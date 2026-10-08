@@ -1,7 +1,7 @@
 from pathlib import Path
 
 # Folder with images
-FOLDER = Path("/Users/artemnovohatnii/Downloads/archive(1)/images/images/plastic_trash_bags/default")
+FOLDER = Path("/")
 
 # Class name
 CLASS_NAME = "trash_bags"

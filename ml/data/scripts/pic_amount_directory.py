@@ -1,7 +1,7 @@
 from pathlib import Path
 
 # Dataset folder
-FOLDER = Path("/Users/artemnovohatnii/Desktop/uni/second_year/m5/project_dataset")
+FOLDER = Path("/")
 
 # Image formats
 extensions = {".jpg", ".jpeg", ".png", ".webp"}
