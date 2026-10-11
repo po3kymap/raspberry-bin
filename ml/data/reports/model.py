@@ -25,54 +25,6 @@ MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
 
-def file_hash(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as image_file:
-        for chunk in iter(lambda: image_file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def collect_duplicate_groups(dataset_path):
-    grouped = defaultdict(list)
-    unreadable = 0
-
-    for label_index, label in enumerate(CATEGORIES):
-        folder = dataset_path / label
-        if not folder.is_dir():
-            raise FileNotFoundError(f"Category folder not found: {folder}")
-        for path in folder.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
-                continue
-            try:
-                with Image.open(path) as image:
-                    image.verify()
-                grouped[file_hash(path)].append((path, label_index))
-            except Exception as error:
-                unreadable += 1
-                print(f"Skipping unreadable image: {path} ({error})")
-
-    conflicting = []
-    samples = []
-    duplicates = 0
-    for digest, entries in grouped.items():
-        labels = {label_index for _, label_index in entries}
-        if len(labels) > 1:
-            conflicting.append(entries)
-            continue
-        duplicates += len(entries) - 1
-        samples.append({"hash": digest, "label": entries[0][1], "paths": [path for path, _ in entries]})
-
-    if conflicting:
-        print("Exact duplicate files have conflicting folder labels:")
-        for entries in conflicting[:20]:
-            for path, label_index in entries:
-                print(f"  {CATEGORIES[label_index]}: {path}")
-        raise SystemExit("Fix these duplicate-label conflicts before training.")
-
-    return samples, duplicates, unreadable
-
-
 def split_groups(samples, seed):
     """Assign exact-duplicate groups to splits while keeping each class represented."""
     rng = random.Random(seed)
