@@ -1,12 +1,12 @@
 from pathlib import Path
 
 # Folder with images
-FOLDER = Path("/")
+FOLDER = Path("")
 
 # Class name
-CLASS_NAME = "trash_bags"
+CLASS_NAME = ""
 # Starting number
-START_NUMBER = 0
+START_NUMBER = 38
 
 # Supported formats
 extensions = {".jpg", ".jpeg", ".png", ".webp"}
