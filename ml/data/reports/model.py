@@ -2,9 +2,8 @@
 """Train and evaluate a MobileNetV3-Small waste-image classifier."""
 
 import argparse
-import hashlib
 import random
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import torch
@@ -14,10 +13,10 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
 DEFAULT_DATASET = Path(
-    ""
+    "/Users/artemnovohatnii/Desktop/uni/second_year/m5/project_dataset"
 )
 DEFAULT_MODEL = Path(
-    ""
+    "/Users/artemnovohatnii/Desktop/uni/second_year/m5/project/ml/models/mobilenetv3_waste_new.pth"
 )
 CATEGORIES = ["GENERAL_WASTE", "ORGANIC", "PAPER", "PMD", "UNSUPPORTED"]
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
@@ -25,40 +24,59 @@ MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
 
-def split_groups(samples, seed):
-    """Assign exact-duplicate groups to splits while keeping each class represented."""
+def collect_images(dataset_path):
+    """Load readable images and their labels directly from category folders."""
+    samples = []
+    unreadable = 0
+
+    for label_index, label in enumerate(CATEGORIES):
+        folder = dataset_path / label
+        if not folder.is_dir():
+            raise FileNotFoundError(f"Category folder not found: {folder}")
+
+        for path in folder.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            try:
+                with Image.open(path) as image:
+                    image.verify()
+                samples.append({"path": path, "label": label_index})
+            except Exception as error:
+                unreadable += 1
+                print(f"Skipping unreadable image: {path} ({error})")
+
+    if not samples:
+        raise SystemExit(f"No readable images found in: {dataset_path}")
+    return samples, unreadable
+
+
+def split_samples(samples, seed):
+    """Create reproducible stratified train, validation, and test splits."""
     rng = random.Random(seed)
     split_names = ("train", "val", "test")
-    ratios = {"train": 0.70, "val": 0.15, "test": 0.15}
     assignments = {name: [] for name in split_names}
 
     for label_index in range(len(CATEGORIES)):
-        groups = [sample for sample in samples if sample["label"] == label_index]
-        rng.shuffle(groups)
-        groups.sort(key=lambda sample: len(sample["paths"]), reverse=True)
-        totals = Counter()
-        target = sum(len(sample["paths"]) for sample in groups)
-
-        for group in groups:
-            split_name = min(
-                split_names,
-                key=lambda name: (totals[name] / max(target * ratios[name], 1), totals[name]),
+        class_samples = [sample for sample in samples if sample["label"] == label_index]
+        if len(class_samples) < 3:
+            raise SystemExit(
+                f"Class {CATEGORIES[label_index]} needs at least 3 readable images to split."
             )
-            assignments[split_name].append(group)
-            totals[split_name] += len(group["paths"])
+        rng.shuffle(class_samples)
+        train_end = int(len(class_samples) * 0.70)
+        val_end = train_end + int(len(class_samples) * 0.15)
+        assignments["train"].extend(class_samples[:train_end])
+        assignments["val"].extend(class_samples[train_end:val_end])
+        assignments["test"].extend(class_samples[val_end:])
 
-    for name in split_names:
-        rng.shuffle(assignments[name])
+    for split in split_names:
+        rng.shuffle(assignments[split])
     return assignments
 
 
 class WasteImageDataset(Dataset):
     def __init__(self, samples, transform):
-        self.items = [
-            (path, sample["label"])
-            for sample in samples
-            for path in sample["paths"]
-        ]
+        self.items = [(sample["path"], sample["label"]) for sample in samples]
         self.transform = transform
 
     def __len__(self):
@@ -72,7 +90,7 @@ class WasteImageDataset(Dataset):
 
 
 def make_splits(samples, seed):
-    grouped = split_groups(samples, seed)
+    grouped = split_samples(samples, seed)
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(224, scale=(0.75, 1.0)),
         transforms.RandomHorizontalFlip(),
@@ -186,7 +204,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train and evaluate a five-class waste classifier.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--model-out", type=Path, default=DEFAULT_MODEL)
-    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -204,10 +222,9 @@ def main():
         device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    samples, duplicates, unreadable = collect_duplicate_groups(args.dataset)
+    samples, unreadable = collect_images(args.dataset)
     grouped, datasets = make_splits(samples, args.seed)
-    print(f"Unique image groups: {len(samples)}")
-    print(f"Exact duplicate copies grouped together: {duplicates}")
+    print(f"Readable images: {len(samples)}")
     print(f"Unreadable images skipped: {unreadable}")
     for split_name in grouped:
         print(f"{split_name.capitalize()} images: {len(datasets[split_name])}")
