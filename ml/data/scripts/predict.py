@@ -9,10 +9,10 @@ from PIL import Image
 from torchvision import models, transforms
 
 DEFAULT_MODEL = Path(
-    "/Users/artemnovohatnii/Desktop/uni/second_year/m5/project/ml/models/mobilenetv3_waste_new.pth"
+    "/"
 )
 # Change this path to the image file or folder you want to classify.
-IMAGE_PATH = Path("/Users/artemnovohatnii/Downloads/save/_10.jpeg")
+IMAGE_PATH = Path("")
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)

@@ -13,10 +13,10 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
 DEFAULT_DATASET = Path(
-    "/Users/artemnovohatnii/Desktop/uni/second_year/m5/project_dataset"
+    ""
 )
 DEFAULT_MODEL = Path(
-    "/Users/artemnovohatnii/Desktop/uni/second_year/m5/project/ml/models/mobilenetv3_waste_new.pth"
+    ""
 )
 CATEGORIES = ["GENERAL_WASTE", "ORGANIC", "PAPER", "PMD", "UNSUPPORTED"]
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
