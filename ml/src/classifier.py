@@ -4,13 +4,10 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from ml.data.scripts.predict import load_model, choose_device, get_transform
 
-# Input limits: the Pi Camera Module 2 takes 3280 x 2464 photos (~8 MP),
-# so anything far above that is not a real scan and is rejected.
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 4096 * 4096
 ALLOWED_FORMATS = {"JPEG", "PNG"}
 
-# The bin has four compartments; UNSUPPORTED items must never be sorted.
 SORTABLE_CATEGORIES = {"GENERAL_WASTE", "ORGANIC", "PAPER", "PMD"}
 DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
@@ -35,12 +32,9 @@ class WasteClassifier:
 
     def predict(self, image_path):
         try:
-            # Checked before the image is opened, so huge files are never read.
             if os.path.getsize(image_path) > MAX_FILE_SIZE_BYTES:
                 return error_response("file_too_large", "Image file is too large.")
 
-            # Image.open only reads the header, so format and size are known
-            # before the pixels are decoded.
             with Image.open(image_path) as image:
                 if image.format not in ALLOWED_FORMATS:
                     return error_response("unsupported_format", "Only JPEG and PNG images are accepted.")
@@ -70,7 +64,6 @@ class WasteClassifier:
         category = self.categories[index]
         confidence = probabilities[index].item()
 
-        # "ok" means the image was classified; only can_sort allows the bin to move.
         if category not in SORTABLE_CATEGORIES:
             can_sort, reason = False, "unsupported_item"
         elif confidence < self.confidence_threshold:
@@ -89,7 +82,7 @@ class WasteClassifier:
 
 
 if __name__ == "__main__":
-    classifier = WasteClassifier("ml/models/mobilenetv3_waste_sd.pth")
+    classifier = WasteClassifier("ml/models/mobilenetv3_waste_new.pth")
     print("Device:", classifier.device)
     print("Categories: ", classifier.categories)
     result = classifier.predict("ml/data/example.jpg")
