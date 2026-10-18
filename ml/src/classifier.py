@@ -1,3 +1,4 @@
+import io
 import os
 
 import torch
@@ -35,7 +36,23 @@ class WasteClassifier:
             if os.path.getsize(image_path) > MAX_FILE_SIZE_BYTES:
                 return error_response("file_too_large", "Image file is too large.")
 
-            with Image.open(image_path) as image:
+            with open(image_path, "rb") as file:
+                data = file.read()
+        except FileNotFoundError:
+            return error_response("file_not_found", "Image file not found.")
+
+        except OSError:
+            return error_response("unreadable_image", "Image could not be read.")
+
+        return self.predict_bytes(data)
+
+
+    def predict_bytes(self, data):
+        if len(data) > MAX_FILE_SIZE_BYTES:
+            return error_response("file_too_large", "Image file is too large.")
+
+        try:
+            with Image.open(io.BytesIO(data)) as image:
                 if image.format not in ALLOWED_FORMATS:
                     return error_response("unsupported_format", "Only JPEG and PNG images are accepted.")
 
@@ -45,9 +62,6 @@ class WasteClassifier:
 
                 image = image.convert("RGB")
                 tensor = self.preprocess(image).unsqueeze(0)
-        except FileNotFoundError:
-            return error_response("file_not_found", "Image file not found.")
-
         except Image.DecompressionBombError:
             return error_response("image_too_large", "Image resolution is too large.")
 
