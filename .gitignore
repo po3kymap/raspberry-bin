@@ -1,3 +1,7 @@
 .venv/
 
 /ml/data
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
