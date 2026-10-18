@@ -9,7 +9,7 @@ from PIL import Image
 from torchvision import models, transforms
 
 DEFAULT_MODEL = Path(
-    ""
+    "/"
 )
 # Change this path to the image file or folder you want to classify.
 IMAGE_PATH = Path("")
