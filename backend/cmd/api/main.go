@@ -1,32 +1,28 @@
 package main
 
 import (
-	"os"
 	"raspberry-bin-api/config"
 	"raspberry-bin-api/internal/clients"
 	"raspberry-bin-api/internal/handlers"
 	"raspberry-bin-api/internal/repository"
+	"raspberry-bin-api/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
 
+const bucketName = "raspberry-bin-67d4f.firebasestorage.app"
+
 func main() {
-	if err := os.MkdirAll("uploads", 0755); err != nil {
-		panic("Failed to create uploads directory")
-	}
+	firebaseApp := config.InitFirebase(bucketName)
+	defer firebaseApp.DB.Close()
 
-	db := config.InitFirestore()
-	defer db.Close()
-
-	scanRepo := repository.NewScanRepository(db)
-	
+	scanRepo := repository.NewScanRepository(firebaseApp.DB)
 	aiClient := clients.NewAIClient("http://localhost:5000")
-	
-	scanHandler := handlers.NewScanHandler(scanRepo, aiClient)
+	fileStorage := storage.NewFileStorage(firebaseApp.Storage, bucketName)
+
+	scanHandler := handlers.NewScanHandler(scanRepo, aiClient, fileStorage)
 
 	r := gin.Default()
-
-	r.Static("/uploads", "./uploads")
 
 	api := r.Group("/api")
 	{
