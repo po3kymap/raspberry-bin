@@ -1,0 +1,11 @@
+services:
+  api:
+    container_name: raspberry-bin-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+      - ./uploads:/app/uploads
