@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"time"
 )
 
@@ -22,18 +25,29 @@ func NewAIClient(baseURL string) *AIClient {
 	}
 }
 
-type predictRequest struct {
-	ImageURL string `json:"image_url"`
-}
-
 type predictResponse struct {
 	Category string `json:"category"`
 }
 
-func (c *AIClient) PredictCategory(imageURL string) (string, error) {
-	reqBody, _ := json.Marshal(predictRequest{ImageURL: imageURL})
+func (c *AIClient) PredictCategory(image *multipart.FileHeader) (string, error) {
+	file, err := image.Open()
+	if err != nil {
+		return "", fmt.Errorf("failed to open image: %w", err)
+	}
+	defer file.Close()
 
-	resp, err := c.HTTP.Post(c.BaseURL+"/predict", "application/json", bytes.NewBuffer(reqBody))
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", filepath.Base(image.Filename))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return "", err
+	}
+	writer.Close()
+
+	resp, err := c.HTTP.Post(c.BaseURL+"/predict", writer.FormDataContentType(), &body)
 	if err != nil {
 		return "", fmt.Errorf("failed to contact AI service: %w", err)
 	}

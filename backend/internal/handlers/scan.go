@@ -39,7 +39,7 @@ func (h *ScanHandler) HandleScan(c *gin.Context) {
 		return
 	}
 
-	detectedCategory, err := h.AIClient.PredictCategory(imageURL)
+	detectedCategory, err := h.AIClient.PredictCategory(req.Image)
 	if err != nil {
 		fmt.Printf("[WARN] AI Prediction failed: %v\n", err)
 		detectedCategory = "unknown"
