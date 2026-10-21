@@ -3,12 +3,11 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"path/filepath"
-	"time"
 
 	"raspberry-bin-api/internal/clients"
 	"raspberry-bin-api/internal/models"
 	"raspberry-bin-api/internal/repository"
+	"raspberry-bin-api/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,12 +15,14 @@ import (
 type ScanHandler struct {
 	Repo     *repository.ScanRepository
 	AIClient *clients.AIClient
+	Storage  *storage.FileStorage
 }
 
-func NewScanHandler(repo *repository.ScanRepository, aiClient *clients.AIClient) *ScanHandler {
+func NewScanHandler(repo *repository.ScanRepository, aiClient *clients.AIClient, fileStorage *storage.FileStorage) *ScanHandler {
 	return &ScanHandler{
 		Repo:     repo,
 		AIClient: aiClient,
+		Storage:  fileStorage,
 	}
 }
 
@@ -32,19 +33,15 @@ func (h *ScanHandler) HandleScan(c *gin.Context) {
 		return
 	}
 
-	filename := fmt.Sprintf("%d-%s", time.Now().UnixNano(), filepath.Base(req.Image.Filename))
-	savePath := filepath.Join("uploads", filename)
-
-	if err := c.SaveUploadedFile(req.Image, savePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image"})
+	imageURL, err := h.Storage.UploadImage(req.Image)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image"})
 		return
 	}
 
-	imageURL := fmt.Sprintf("http://localhost:8080/uploads/%s", filename)
-
 	detectedCategory, err := h.AIClient.PredictCategory(imageURL)
 	if err != nil {
-		fmt.Printf("[WARN] AI Prediction failed (using fallback): %v\n", err)
+		fmt.Printf("[WARN] AI Prediction failed: %v\n", err)
 		detectedCategory = "unknown"
 	}
 
