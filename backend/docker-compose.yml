@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   api:
-    container_name: raspberry-bin-backend
+    container_name: raspberry-bin-api
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,3 +8,4 @@ services:
       - "8080:8080"
     volumes:
       - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+      - ./uploads:/app/uploads
