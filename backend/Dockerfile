@@ -8,13 +8,17 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o api ./cmd/api/main.go
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o api ./cmd/api
 
-FROM alpine:latest
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
 COPY --from=builder /app/api .
+
+ENV GIN_MODE=release
 
 EXPOSE 8080
 

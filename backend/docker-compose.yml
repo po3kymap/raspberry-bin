@@ -4,7 +4,43 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+    restart: unless-stopped
+    # Not published to the internet: only reachable through Caddy
+    expose:
+      - "8080"
+    environment:
+      # Where the ML service listens; default is port 5000 on the host machine
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://host.docker.internal:5000}
+      FIREBASE_CREDENTIALS: /app/serviceAccountKey.json
+      DEVICE_API_KEY: ${DEVICE_API_KEY:?Set DEVICE_API_KEY in .env}
+      # Docker's internal networks, where Caddy's requests come from
+      TRUSTED_PROXIES: 172.16.0.0/12
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    container_name: raspberry-bin-caddy
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:
