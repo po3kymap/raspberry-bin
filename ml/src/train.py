@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Train the Raspberry Bin waste classifier.
-
-Examples
---------
-# internet data only
-python ml/src/train.py --dataset ~/Desktop/uni/second_year/m5/project_dataset_clean
-
-# internet data + own photos from the box (recommended)
-python ml/src/train.py --dataset .../project_dataset_clean --own .../project_dataset_own --arch mobilenet_v3_large
-
-# DINOv2 ViT-S/14 (needs: pip install timm)
-python ml/src/train.py --dataset ../project_dataset_clean --arch dinov2_vits14
-
-Every run gets its own folder: ml/models/train, ml/models/train2, ml/models/train3, ...
-
-Own photos: same class folders (GENERAL_WASTE, ORGANIC, PAPER, PMD, UNSUPPORTED).
-Name files <anything>_<item>_<nr>.jpg, e.g. PMD_cola_can_03.jpg: everything before the last
-"_<number>" is the item id. Train/val/test for own photos are split BY ITEM, so the test
-measures items the model has never seen.
-"""
+"""Train the Raspberry Bin waste classifier."""
 
 import argparse
 import io
@@ -38,7 +19,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from torchvision import models, transforms
 
 
-# ---------------------------------------------------------------- preprocessing & models
+# Preprocessing and models
 
 CATEGORIES = ["GENERAL_WASTE", "ORGANIC", "PAPER", "PMD", "UNSUPPORTED"]
 REJECT_CLASS = "UNSUPPORTED"
@@ -47,12 +28,12 @@ MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 ARCHS = ("mobilenet_v3_small", "mobilenet_v3_large", "efficientnet_b0", "convnext_small",
          "dinov2_vits14", "dinov2_vitb14")
-# DINOv2 backbones come from timm (pip install timm); weights are downloaded from the Hugging Face hub.
+# DINOv2 models are loaded with timm. Weights come from Hugging Face.
 DINOV2_TIMM_NAMES = {
     "dinov2_vits14": "vit_small_patch14_dinov2.lvd142m",
     "dinov2_vitb14": "vit_base_patch14_dinov2.lvd142m",
 }
-# Modern CNNs from timm: pretrained on ImageNet-22k, then fine-tuned on ImageNet-1k (best for transfer).
+# ConvNeXt is loaded with timm. It is pretrained on ImageNet 22k and ImageNet 1k.
 TIMM_CNN_NAMES = {
     "convnext_small": "convnext_small.fb_in22k_ft_in1k",
 }
@@ -72,7 +53,7 @@ def load_rgb(path):
 
 
 class PadToSquare:
-    """Pad to a square using the image's own border colour (no grey bars that could act as a class hint)."""
+    """Pad the image to a square with its own border color."""
 
     def __call__(self, image):
         w, h = image.size
@@ -93,7 +74,7 @@ class RandomRot90:
 
 
 class RandomJpeg:
-    """Simulate camera / compression artefacts."""
+    """Add JPEG artifacts like a cheap camera."""
 
     def __init__(self, p=0.3, quality=(35, 90)):
         self.p, self.quality = p, quality
@@ -143,8 +124,7 @@ def eval_transform(size=224):
 def build_model(arch, num_classes, pretrained=True, image_size=224):
     if arch in DINOV2_TIMM_NAMES:
         import timm
-        # DINOv2 is pretrained at 518 px; timm interpolates the position embeddings to image_size
-        # (must be a multiple of the 14 px patch, e.g. 224).
+        # DINOv2 needs an image size that divides by 14.
         return timm.create_model(DINOV2_TIMM_NAMES[arch], pretrained=pretrained, num_classes=num_classes,
                                  img_size=image_size, drop_path_rate=0.1)
     if arch in TIMM_CNN_NAMES:
@@ -166,12 +146,11 @@ def build_model(arch, num_classes, pretrained=True, image_size=224):
 
 
 def param_groups(model, arch, lr, weight_decay, layer_decay=0.7):
-    """AdamW parameter groups: no weight decay on norm/bias/tokens.
+    """Build AdamW parameter groups.
 
-    DINOv2: layer-wise LR decay, the head gets `lr`, every transformer block below it gets
-    `layer_decay` times less, so the pretrained early layers barely move.
-    CNNs: the new final layer gets `lr`, the pretrained body 0.3 * lr
-    (torchvision calls that layer classifier.*, timm head.fc.*).
+    The new head learns fastest. In DINOv2 every lower block learns a bit slower.
+    In CNNs the pretrained body learns at 0.3 of the head rate.
+    Norm and bias weights get no weight decay.
     """
     if arch in DINOV2_TIMM_NAMES:
         depth = len(model.blocks)
@@ -181,7 +160,7 @@ def param_groups(model, arch, lr, weight_decay, layer_decay=0.7):
                 return 0
             if name.startswith("blocks."):
                 return int(name.split(".")[1]) + 1
-            return depth + 1  # final norm + head
+            return depth + 1  # final norm and head
 
         def scale(name):
             return layer_decay ** (depth + 1 - layer(name))
@@ -205,9 +184,9 @@ MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
 DEFAULT_DATASET = Path(__file__).resolve().parents[3] / "project_dataset_clean"
 
 
-# ---------------------------------------------------------------- data
+# Data
 
-# Name used in the saved files: model_<NAME>.pth, report_<NAME>.json, errors_<NAME>.tsv
+# Short model names used in the saved file names.
 DISPLAY_NAMES = {
     "mobilenet_v3_small": "MobileNetV3-Small",
     "mobilenet_v3_large": "MobileNetV3-Large",
@@ -217,8 +196,9 @@ DISPLAY_NAMES = {
     "dinov2_vitb14": "DINOv2-ViT-B-14",
 }
 
+
 def output_paths(folder, name):
-    """model_<name>.pth etc.; if that name is taken, use <name>_2, <name>_3 ... (never overwrite)."""
+    """Return the output file paths. Add a number if the name is already taken."""
     folder = Path(folder)
     candidate, i = name, 2
     while (folder / f"model_{candidate}.pth").exists() or (folder / f"report_{candidate}.json").exists():
@@ -248,7 +228,7 @@ def collect(root, source):
 
 
 def grouped_split(samples, fractions, seed):
-    """Stratified by class, grouped by `group` so one item never sits in two splits."""
+    """Split each class into train, val and test. One item never lands in two splits."""
     rng = random.Random(seed)
     out = {"train": [], "val": [], "test": []}
     by_class = defaultdict(lambda: defaultdict(list))
@@ -282,8 +262,7 @@ class Images(Dataset):
 
 
 def balanced_sampler(samples, own_weight):
-    """Every class is drawn equally often; inside a class an own photo is `own_weight`x more likely
-    than an internet photo."""
+    """Sample every class equally often. Own photos are picked more often than internet photos."""
     raw = [own_weight if s["source"] == "own" else 1.0 for s in samples]
     per_class = Counter()
     for s, r in zip(samples, raw):
@@ -292,7 +271,7 @@ def balanced_sampler(samples, own_weight):
     return WeightedRandomSampler(weights, num_samples=len(samples), replacement=True)
 
 
-# ---------------------------------------------------------------- metrics
+# Metrics
 
 def confusion(labels, preds, k=len(CATEGORIES)):
     m = [[0] * k for _ in range(k)]
@@ -329,7 +308,7 @@ def summarize(labels, preds):
 
 
 def threshold_table(labels, probs):
-    """Accuracy among accepted items vs. how many get rejected, for a range of thresholds."""
+    """For each threshold, compute accuracy on accepted items and how many items get rejected."""
     rej = CATEGORIES.index(REJECT_CLASS)
     rows = []
     for t in [round(x * 0.05, 2) for x in range(6, 20)]:
@@ -362,7 +341,7 @@ def pick_threshold(rows, max_reject):
     return max(ok, key=lambda r: (r["accuracy_on_accepted"], -r["threshold"]))
 
 
-# ---------------------------------------------------------------- loop
+# Training
 
 def amp_dtype(device):
     if device.type != "cuda":
@@ -389,31 +368,30 @@ def predict(model, loader, device):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dataset", type=Path, default=DEFAULT_DATASET,
-                    help="cleaned internet dataset (class folders); default: ../project_dataset_clean")
-    ap.add_argument("--own", type=Path, help="own photos from the box (class folders)")
-    ap.add_argument("--own-weight", type=float, default=5.0, help="how much more often own photos are sampled")
-    ap.add_argument("--out", type=Path, default=MODELS_DIR, help="folder for the saved files (default: ml/models)")
-    ap.add_argument("--name", help="name in the file names (default: from --arch, e.g. DINOv2-ViT-S-14)")
+                    help="Dataset folder with one subfolder per class.")
+    ap.add_argument("--own", type=Path, help="Folder with own photos from the bin.")
+    ap.add_argument("--own-weight", type=float, default=5.0, help="How much more often own photos are sampled.")
+    ap.add_argument("--out", type=Path, default=MODELS_DIR, help="Folder for the saved files.")
+    ap.add_argument("--name", help="Name used in the saved file names.")
     ap.add_argument("--arch", choices=ARCHS, default="dinov2_vits14")
     ap.add_argument("--epochs", type=int, default=25)
     ap.add_argument("--batch-size", type=int, default=48)
     ap.add_argument("--lr", type=float, default=None,
-                    help="head learning rate (default 5e-4 for MobileNet/EfficientNet, 2e-4 for ConvNeXt, "
-                         "3e-4 for DINOv2)")
+                    help="Learning rate of the head. The default depends on the model.")
     ap.add_argument("--layer-decay", type=float, default=0.75,
-                    help="DINOv2 only: each transformer block below the head learns this much slower")
+                    help="DINOv2 only. Each lower block learns this much slower.")
     ap.add_argument("--image-size", type=int, default=224)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-reject", type=float, default=0.10,
-                    help="max share of supported items the threshold may reject (on validation)")
-    ap.add_argument("--limit", type=int, default=0, help="debug: use at most N images per class")
+                    help="Max share of valid items the threshold may reject.")
+    ap.add_argument("--limit", type=int, default=0, help="Use at most N images per class. For quick tests.")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     is_vit = args.arch in DINOV2_TIMM_NAMES
     if args.lr is None:
         args.lr = 3e-4 if is_vit else 2e-4 if args.arch == "convnext_small" else 5e-4
     if is_vit and args.image_size % 14:
-        raise SystemExit("DINOv2 needs --image-size divisible by 14 (e.g. 224 or 266).")
+        raise SystemExit("DINOv2 needs an image size that divides by 14, for example 224.")
 
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -440,7 +418,7 @@ def main():
     if own:
         items = Counter(g.split("/")[0] for g in {s["group"] for s in own})
         print("own photos per class:", dict(Counter(CATEGORIES[s["label"]] for s in own)))
-        print("own items per class: ", dict(items), "(val/test are split by item)")
+        print("own items per class: ", dict(items))
 
     tf_train, tf_eval = train_transform(args.image_size), eval_transform(args.image_size)
     common = dict(num_workers=args.workers, persistent_workers=args.workers > 0, pin_memory=device.type == "cuda")
@@ -458,7 +436,7 @@ def main():
     opt = torch.optim.AdamW(param_groups(model, args.arch, args.lr, 0.05 if is_vit or args.arch == "convnext_small" else 0.02,
                                          args.layer_decay))
     steps = args.epochs * len(train_loader)
-    warm = len(train_loader) * (2 if is_vit else 1)  # transformers like a longer warmup
+    warm = len(train_loader) * (2 if is_vit else 1)  # Transformers need a longer warmup.
     dtype = amp_dtype(device)
     scaler = torch.amp.GradScaler("cuda", enabled=dtype == torch.float16)
     print(f"mixed precision: {dtype}  lr(head)={args.lr}")
@@ -490,7 +468,7 @@ def main():
             if k in eval_loaders:
                 lab, pre, _, _ = predict(model, eval_loaders[k], device)
                 rec[k + "_macro_f1"] = summarize(lab, pre)["macro_f1"]
-        # own photos are what the real bin sees, so they count for half the score when present
+        # Own photos look like the real bin, so they count for half of the score.
         score = rec["val_internet_macro_f1"] if "val_own_macro_f1" not in rec else \
             0.5 * rec["val_internet_macro_f1"] + 0.5 * rec["val_own_macro_f1"]
         rec["score"] = round(score, 4)
@@ -542,8 +520,7 @@ def main():
                  f"unsupported_caught={r['with_threshold']['unsupported_caught']:.3f}" if "with_threshold" in r else ""))
         print("   " + "  ".join(f"{c[:7]}:R{v['recall']:.2f}/P{v['precision']:.2f}" for c, v in r["per_class"].items()))
     print(f"\nchosen threshold: {chosen}")
-    print(f"saved: {paths['model']}, {paths['report']}, {paths['errors']} "
-          f"(errors.tsv sorted by confidence: confident mistakes are often wrong labels)")
+    print(f"saved: {paths['model']}, {paths['report']}, {paths['errors']}")
 
 
 if __name__ == "__main__":
