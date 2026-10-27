@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -114,15 +113,19 @@ func (h *ScanHandler) HandleScan(c *gin.Context) {
 		return
 	}
 
-	detectedCategory, err := h.AIClient.PredictCategory(imageURL)
+	prediction, err := h.AIClient.Predict(req.Image, contentType)
 	if err != nil {
-		fmt.Printf("[WARN] AI Prediction failed: %v\n", err)
-		detectedCategory = "unknown"
+		// Fail closed: without a classification no lid may open
+		log.Printf("[WARN] AI prediction failed: %v", err)
+		prediction = &clients.Prediction{Category: "unknown", Reason: "classifier_unavailable"}
 	}
 
 	resp := models.ScanResponse{
-		BinID:    req.BinID,
-		Category: detectedCategory,
+		BinID:      req.BinID,
+		Category:   prediction.Category,
+		Confidence: prediction.Confidence,
+		CanSort:    prediction.CanSort,
+		Reason:     prediction.Reason,
 	}
 
 	err = h.Repo.SaveScan(resp, imageURL)

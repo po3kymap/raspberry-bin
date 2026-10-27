@@ -22,6 +22,9 @@ func (r *ScanRepository) SaveScan(scan models.ScanResponse, imageURL string) err
 	data := map[string]interface{}{
 		"bin_id":     scan.BinID,
 		"category":   scan.Category,
+		"confidence": scan.Confidence,
+		"can_sort":   scan.CanSort,
+		"reason":     scan.Reason,
 		"image_url":  imageURL,
 		"scanned_at": time.Now(),
 	}

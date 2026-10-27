@@ -25,3 +25,7 @@ train_log*.txt
 project_dataset_clean*/
 real_test/
 dataset_audit/
+
+# Secrets
+serviceAccountKey.json
+.env
