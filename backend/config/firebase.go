@@ -15,8 +15,8 @@ type FirebaseApp struct {
 	Storage *storage.Client
 }
 
-func InitFirebase(bucketName string) *FirebaseApp {
-	opt := option.WithCredentialsFile("serviceAccountKey.json")
+func InitFirebase(bucketName, credentialsFile string) *FirebaseApp {
+	opt := option.WithCredentialsFile(credentialsFile)
 	config := &firebase.Config{
 		StorageBucket: bucketName,
 	}
