@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"raspberry-bin-api/config"
+	"raspberry-bin-api/internal/auth"
 	"raspberry-bin-api/internal/clients"
 	"raspberry-bin-api/internal/handlers"
 	"raspberry-bin-api/internal/middleware"
@@ -26,6 +27,9 @@ const (
 
 	// Minimum length for the device API key (32 random bytes in hex = 64 chars)
 	minAPIKeyLength = 32
+
+	// A login request is only a small JSON object
+	maxLoginBodySize = 4 << 10
 )
 
 func getEnv(key, fallback string) string {
@@ -66,6 +70,9 @@ func main() {
 
 	scanHandler := handlers.NewScanHandler(scanRepo, aiClient, fileStorage)
 
+	authService := auth.NewService(repository.NewAdminRepository(firebaseApp.DB))
+	adminHandler := handlers.NewAdminHandler(authService)
+
 	r := gin.Default()
 	r.MaxMultipartMemory = maxScanBodySize
 
@@ -85,6 +92,18 @@ func main() {
 	api := r.Group("/api", scanLimiter.Middleware(), middleware.APIKeyAuth(deviceAPIKey))
 	{
 		api.POST("/scan", middleware.MaxBodySize(maxScanBodySize), scanHandler.HandleScan)
+	}
+
+	// Admin routes are used by the web dashboard, so they use admin sessions
+	// instead of the device API key. Login gets its own, stricter rate limit
+	// on top of the 5-attempt account lock.
+	loginLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 5)
+	r.POST("/api/admin/login", loginLimiter.Middleware(), middleware.MaxBodySize(maxLoginBodySize), adminHandler.Login)
+
+	admin := r.Group("/api/admin", middleware.RequireAdmin(authService))
+	{
+		admin.GET("/me", adminHandler.Me)
+		admin.POST("/logout", adminHandler.Logout)
 	}
 
 	r.Run(":" + port)

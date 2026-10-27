@@ -8,7 +8,8 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o api ./cmd/api
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o api ./cmd/api && \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o create-admin ./cmd/create-admin
 
 FROM alpine:3.22
 
@@ -16,7 +17,7 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
-COPY --from=builder /app/api .
+COPY --from=builder /app/api /app/create-admin ./
 
 ENV GIN_MODE=release
 
