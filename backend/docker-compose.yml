@@ -9,14 +9,15 @@ services:
     expose:
       - "8080"
     environment:
-      # Where the ML service listens; default is port 5000 on the host machine
-      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://host.docker.internal:5000}
+      # The ML container, found by its service name on the "ml" network
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ml:5000}
       FIREBASE_CREDENTIALS: /app/serviceAccountKey.json
       DEVICE_API_KEY: ${DEVICE_API_KEY:?Set DEVICE_API_KEY in .env}
       # Docker's internal networks, where Caddy's requests come from
       TRUSTED_PROXIES: 172.16.0.0/12
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    networks:
+      - web
+      - ml
     volumes:
       - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
     healthcheck:
@@ -24,6 +25,26 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  ml:
+    container_name: raspberry-bin-ml
+    build:
+      # Repository root, because the code imports the "ml" package
+      context: ..
+      dockerfile: ml/Dockerfile
+    restart: unless-stopped
+    # No ports and only on the internal "ml" network: reachable by the API only,
+    # not by Caddy or the internet, and it cannot connect out to the internet either.
+    expose:
+      - "5000"
+    networks:
+      - ml
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   caddy:
     container_name: raspberry-bin-caddy
@@ -34,12 +55,21 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    networks:
+      - web
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - api
+
+networks:
+  # Caddy <-> API; also gives the API internet access for Firebase
+  web:
+  # API <-> ML only; "internal" means no route to the outside world
+  ml:
+    internal: true
 
 volumes:
   caddy_data:

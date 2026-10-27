@@ -1,0 +1,9 @@
+# Used when building the ML image from the repository root.
+# Ignore everything, then allow only what the image needs.
+*
+!ml/requirements.txt
+!ml/src/
+!ml/service/
+!ml/tests/
+!ml/models/model_ConvNeXt-Small.pth
+**/__pycache__
