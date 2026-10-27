@@ -3,14 +3,22 @@ import os
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 
-from ml.src.classifier import DEFAULT_CONFIDENCE_THRESHOLD, MAX_FILE_SIZE_BYTES, WasteClassifier
+from ml.src.classifier import MAX_FILE_SIZE_BYTES, WasteClassifier
 
-MODEL_PATH = os.environ.get("MODEL_PATH", "ml/models/mobilenetv3_waste_new.pth")
-CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", DEFAULT_CONFIDENCE_THRESHOLD))
+MODEL_PATH = os.environ.get("MODEL_PATH", "ml/models/model_ConvNeXt-Small.pth")
 
-app = FastAPI(title="RaspberryBin ML service")
+# Optional override; by default the threshold stored in the model file is used
+CONFIDENCE_THRESHOLD = os.environ.get("CONFIDENCE_THRESHOLD")
 
-classifier = WasteClassifier(MODEL_PATH, CONFIDENCE_THRESHOLD)
+# No interactive API docs: the service is internal and only called by the backend
+app = FastAPI(title="RaspberryBin ML service", docs_url=None, redoc_url=None, openapi_url=None)
+
+classifier = WasteClassifier(MODEL_PATH, float(CONFIDENCE_THRESHOLD) if CONFIDENCE_THRESHOLD else None)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/predict")

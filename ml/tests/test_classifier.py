@@ -1,11 +1,12 @@
 import io
+import os
 
 import pytest
 from PIL import Image
 
 from ml.src.classifier import MAX_FILE_SIZE_BYTES, WasteClassifier
 
-MODEL_PATH = "ml/models/mobilenetv3_waste_new.pth"
+MODEL_PATH = os.environ.get("MODEL_PATH", "ml/models/model_ConvNeXt-Small.pth")
 CATEGORIES = {"GENERAL_WASTE", "ORGANIC", "PAPER", "PMD", "UNSUPPORTED"}
 
 
@@ -21,7 +22,7 @@ def image_bytes(image_format, color="white"):
 
 
 def test_valid_image_is_classified(classifier):
-    result = classifier.predict("ml/data/example.jpg")
+    result = classifier.predict_bytes(image_bytes("JPEG", color="green"))
 
     assert result["status"] == "ok"
     assert result["category"] in CATEGORIES

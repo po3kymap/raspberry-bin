@@ -2,15 +2,36 @@ import io
 import os
 
 import torch
-from PIL import Image, UnidentifiedImageError
-from ml.data.scripts.predict import load_model, choose_device, get_transform
+from PIL import Image, ImageOps, UnidentifiedImageError
+from ml.src.train import build_model, eval_transform
 
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 4096 * 4096
 ALLOWED_FORMATS = {"JPEG", "PNG"}
 
 SORTABLE_CATEGORIES = {"GENERAL_WASTE", "ORGANIC", "PAPER", "PMD"}
-DEFAULT_CONFIDENCE_THRESHOLD = 0.6
+
+
+def choose_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def load_model(model_path, device):
+    """Load a model saved by train.py. The file stores everything needed to rebuild it:
+    architecture, categories, image size and the confidence threshold chosen on the validation set."""
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
+    categories = checkpoint["categories"]
+    image_size = checkpoint.get("image_size", 224)
+
+    model = build_model(checkpoint["arch"], len(categories), pretrained=False, image_size=image_size)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+
+    return model.to(device), categories, image_size, checkpoint.get("threshold", 0.5)
 
 
 def error_response(reason, message):
@@ -23,12 +44,14 @@ def error_response(reason, message):
 
 
 class WasteClassifier:
-    def __init__(self, model_path, confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD):
+    def __init__(self, model_path, confidence_threshold=None):
         self.model_path = model_path
-        self.confidence_threshold = confidence_threshold
         self.device = choose_device()
-        self.model, self.categories = load_model(self.model_path, self.device)
-        self.preprocess = get_transform()
+        self.model, self.categories, image_size, saved_threshold = load_model(self.model_path, self.device)
+        self.preprocess = eval_transform(image_size)
+
+        # Use the threshold stored with the model unless one is given explicitly
+        self.confidence_threshold = saved_threshold if confidence_threshold is None else confidence_threshold
 
 
     def predict(self, image_path):
@@ -60,7 +83,8 @@ class WasteClassifier:
                 if width * height > MAX_IMAGE_PIXELS:
                     return error_response("image_too_large", "Image resolution is too large.")
 
-                image = image.convert("RGB")
+                # Same as training: apply the camera's EXIF rotation, then convert to RGB
+                image = ImageOps.exif_transpose(image).convert("RGB")
                 tensor = self.preprocess(image).unsqueeze(0)
         except Image.DecompressionBombError:
             return error_response("image_too_large", "Image resolution is too large.")
@@ -96,7 +120,7 @@ class WasteClassifier:
 
 
 if __name__ == "__main__":
-    classifier = WasteClassifier("ml/models/mobilenetv3_waste_new.pth")
+    classifier = WasteClassifier("ml/models/model_ConvNeXt-Small.pth")
     print("Device:", classifier.device)
     print("Categories: ", classifier.categories)
     result = classifier.predict("ml/data/example.jpg")

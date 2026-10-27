@@ -1,8 +1,31 @@
+# Python / virtual environment
 .venv/
+__pycache__/
+*.pyc
 
-/ml/data
+# IDE and tools
+.idea/
+.claude/
+
+# OS junk
 .DS_Store
-.AppleDouble
-.LSOverride
+Thumbs.db
+
+# Training artefacts: only the final model_*.pth files are committed
+ml/models/report_*.json
+ml/models/errors_*.tsv
+ml/models/*.history.csv
+ml/models/*.metrics.json
+ml/models/run*/
+ml/models/train*/
+*.log
+train_log*.txt
+
+# Datasets live outside the repo
+project_dataset_clean*/
+real_test/
+dataset_audit/
+
+# Secrets
 serviceAccountKey.json
-._*
+.env
