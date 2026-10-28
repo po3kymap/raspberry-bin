@@ -2,7 +2,7 @@ const CATEGORIES = ['GENERAL_WASTE', 'ORGANIC', 'PAPER', 'PMD']
 const requests = new Map()
 const scans = []
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const USERS_KEY = 'raspberrybin_mock_users'
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/
@@ -38,7 +38,7 @@ function checkPasswordStrength(password) {
 }
 
 export async function register(username, password) {
-  await wait(300)
+  await sleep(300)
   const name = username.trim().toLowerCase()
   if (!USERNAME_PATTERN.test(name)) {
     throw new Error("username must be 3-32 characters: a-z, 0-9, '.', '_' or '-'")
@@ -53,7 +53,7 @@ export async function register(username, password) {
 }
 
 export async function login(username, password) {
-  await wait(300)
+  await sleep(300)
   const name = username.trim().toLowerCase()
   const users = loadUsers()
   const user = users[name]
@@ -79,7 +79,7 @@ export async function login(username, password) {
 }
 
 export async function logout() {
-  await wait(100)
+  await sleep(100)
 }
 
 function randomResult() {
@@ -95,17 +95,25 @@ function randomResult() {
 }
 
 export async function startScan() {
-  await wait(300)
+  await sleep(300)
   const requestId = crypto.randomUUID()
   requests.set(requestId, { createdAt: Date.now(), result: randomResult() })
   return { request_id: requestId }
 }
 
-export async function getScanRequest(requestId) {
-  await wait(200)
+export async function getScanRequest(requestId, wait = 25) {
+  await sleep(200)
   const entry = requests.get(requestId)
   if (!entry) throw new Error('Scan request not found')
-  if (Date.now() - entry.createdAt < 2500) return { status: 'pending' }
+
+  const remaining = 2500 - (Date.now() - entry.createdAt)
+  if (remaining > 0) {
+    if (remaining > wait * 1000) {
+      await sleep(wait * 1000)
+      return { status: 'pending' }
+    }
+    await sleep(remaining)
+  }
 
   const result = { ...entry.result, scanned_at: new Date().toISOString() }
   if (!entry.saved) {
@@ -116,12 +124,12 @@ export async function getScanRequest(requestId) {
 }
 
 export async function getRecentScans(limit) {
-  await wait(200)
+  await sleep(200)
   return scans.slice(0, limit)
 }
 
 export async function getStats() {
-  await wait(200)
+  await sleep(200)
   return {
     total: 42,
     sorted: 37,

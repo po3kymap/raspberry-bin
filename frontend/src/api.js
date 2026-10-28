@@ -50,9 +50,21 @@ export function startScan() {
   return request('/api/scan-requests', { method: 'POST', body: JSON.stringify({ bin_id: BIN_ID }) })
 }
 
-export function getScanRequest(requestId) {
-  if (USE_MOCKS) return mock.getScanRequest(requestId)
-  return request(`/api/scan-requests/${encodeURIComponent(requestId)}`)
+export function getScanRequest(requestId, wait = 25) {
+  if (USE_MOCKS) return mock.getScanRequest(requestId, wait)
+  return request(`/api/scan-requests/${encodeURIComponent(requestId)}?wait=${wait}`, {
+    signal: AbortSignal.timeout((wait + 5) * 1000),
+  })
+}
+
+export async function waitForScanResult(requestId, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const wait = Math.min(25, Math.ceil((deadline - Date.now()) / 1000))
+    const response = await getScanRequest(requestId, wait)
+    if (response.status !== 'pending') return response
+  }
+  return { status: 'failed', reason: 'timeout' }
 }
 
 export function getRecentScans(limit = 20) {
