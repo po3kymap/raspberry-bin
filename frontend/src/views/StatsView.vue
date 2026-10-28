@@ -7,7 +7,7 @@ const PERIODS = [
   { id: 'today', label: 'Today' },
   { id: 'week', label: 'This week' },
   { id: 'month', label: 'This month' },
-  { id: 'all', label: 'All time' },
+  { id: 'year', label: 'This year' },
 ]
 const SORTED_CATEGORIES = ['PMD', 'ORGANIC', 'PAPER', 'GENERAL_WASTE']
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -31,7 +31,7 @@ function periodRange(id) {
   if (id === 'today') return { from: dayKey(today), to: dayKey(today) }
   if (id === 'week') return { from: dayKey(startOfWeek(today)), to: dayKey(today) }
   if (id === 'month') return { from: dayKey(new Date(today.getFullYear(), today.getMonth(), 1)), to: dayKey(today) }
-  return {}
+  return { from: dayKey(new Date(today.getFullYear(), 0, 1)), to: dayKey(today) }
 }
 
 async function load() {
