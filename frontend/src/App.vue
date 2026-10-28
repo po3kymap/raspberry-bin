@@ -1,5 +1,22 @@
 <script setup>
-import { RouterLink, RouterView } from 'vue-router'
+import { watch } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import { logout } from './api.js'
+import { session } from './auth.js'
+
+const route = useRoute()
+const router = useRouter()
+
+watch(session, (value) => {
+  if (!value && !route.meta.guest && !route.meta.public) {
+    router.replace({ name: 'login' })
+  }
+})
+
+async function onLogout() {
+  await logout()
+  router.replace({ name: 'login' })
+}
 
 const tabs = [
   { to: '/', label: 'Scan', icon: 'M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10' },
@@ -10,15 +27,22 @@ const tabs = [
 
 <template>
   <div class="mx-auto flex min-h-dvh max-w-md flex-col bg-gray-50">
-    <header class="px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+    <header class="flex items-center justify-between px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
       <span class="text-lg font-semibold">Raspberry<span class="text-brand-600">Bin</span></span>
+      <div v-if="session" class="flex items-center gap-3 text-sm">
+        <span class="text-gray-500">{{ session.username }}</span>
+        <button type="button" class="font-medium text-brand-600" @click="onLogout">Log out</button>
+      </div>
     </header>
 
     <main class="flex-1 px-4 pb-24">
       <RouterView />
     </main>
 
-    <nav class="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)]">
+    <nav
+      v-if="!route.meta.guest"
+      class="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)]"
+    >
       <ul class="mx-auto flex max-w-md">
         <li v-for="tab in tabs" :key="tab.to" class="flex-1">
           <RouterLink
