@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
+// ScanRequest is the form the Pi sends to POST /api/scan after a "capture" command.
 type ScanRequest struct {
-	BinID string                `form:"bin_id" binding:"required"`
-	Image *multipart.FileHeader `form:"image" binding:"required"`
+	BinID     string                `form:"bin_id" binding:"required"`
+	RequestID string                `form:"request_id" binding:"required"`
+	Image     *multipart.FileHeader `form:"image" binding:"required"`
 }
 
 // ScanResponse tells the Pi what to do: open the lid for Category only if CanSort is true.
