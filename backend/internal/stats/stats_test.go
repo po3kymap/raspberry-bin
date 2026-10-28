@@ -77,7 +77,8 @@ func TestSummarizeCountsDaysInLocalTime(t *testing.T) {
 	if s.ByCategory["PMD"] != 2 || s.ByCategory["PAPER"] != 1 || s.ByCategory["UNSUPPORTED"] != 0 {
 		t.Errorf("by_category = %v, want PMD 2, PAPER 1, rejected not counted", s.ByCategory)
 	}
-	want := []DayCount{{"2026-10-26", 3}, {"2026-10-27", 1}}
+	// The 27th only has a rejected scan: it has a scan but no sorted item
+	want := []DayCount{{"2026-10-26", 3, 3}, {"2026-10-27", 1, 0}}
 	if len(s.PerDay) != 2 || s.PerDay[0] != want[0] || s.PerDay[1] != want[1] {
 		t.Errorf("per_day = %v, want %v", s.PerDay, want)
 	}

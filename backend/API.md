@@ -38,7 +38,8 @@ right after you get an answer. Maximum `wait` is 30.
 - `401` wrong username or password, `429` locked for 5 min after 5 wrong passwords
 - Send the token as `Authorization: Bearer <token>` on every request below.
   It expires after 8 hours; any `401` means "log in again".
-- Keep the token in memory or `sessionStorage`, not in a cookie or `localStorage`.
+- Store the token in `sessionStorage` or `localStorage` (team decision, see the
+  P-SBD); never put it in a URL. The strict CSP is what protects it against XSS.
 
 ### `GET /api/auth/me` → `200 {"username": "alice", "role": "user"}`
 ### `POST /api/auth/logout` → `204`
@@ -90,13 +91,16 @@ Dates in Dutch time, both included, default the last 30 days, at most 366 days.
   "summary": {
     "total": 42, "sorted": 37, "rejected": 5,
     "by_category": {"PMD": 15, "ORGANIC": 9, "PAPER": 7, "GENERAL_WASTE": 6},
-    "per_day": [{"date": "2026-10-26", "count": 12}, {"date": "2026-10-27", "count": 30}]
+    "per_day": [{"date": "2026-10-26", "count": 12, "sorted": 11}, {"date": "2026-10-27", "count": 30, "sorted": 26}]
   },
   "streak": {"current": 3, "longest": 7, "last_sorted_date": "2026-10-27"}
 }
 ```
 The streak counts days in a row with at least one **sorted** item (rejected
 scans do not count). `current` is 0 if the last sorted item was before yesterday.
+In `per_day`, `count` is all scans of the day and `sorted` only the sorted ones,
+so a day with `sorted > 0` is a streak day (e.g. for a Mon–Sun checkmark view).
+Days without scans are not listed.
 
 ## Admin (token of an account with role `admin`)
 

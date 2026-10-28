@@ -47,9 +47,12 @@ func previousDay(day string) string {
 	return t.AddDate(0, 0, -1).Format(DateLayout)
 }
 
+// DayCount counts all scans of a day and, separately, the sorted ones
+// (rejected scans do not count for the streak).
 type DayCount struct {
-	Date  string `json:"date"`
-	Count int    `json:"count"`
+	Date   string `json:"date"`
+	Count  int    `json:"count"`
+	Sorted int    `json:"sorted"`
 }
 
 type Summary struct {
@@ -61,24 +64,32 @@ type Summary struct {
 }
 
 // Summarize counts scans: sorted ones by category, rejected ones separately,
-// and all of them per day (oldest day first).
+// and per day both all scans and the sorted ones (oldest day first).
 func Summarize(scans []models.ScanResult, loc *time.Location) Summary {
 	summary := Summary{ByCategory: map[string]int{}, PerDay: []DayCount{}}
-	perDay := map[string]int{}
+	perDay := map[string]*DayCount{}
 
 	for _, s := range scans {
+		date := s.ScannedAt.In(loc).Format(DateLayout)
+		day, ok := perDay[date]
+		if !ok {
+			day = &DayCount{Date: date}
+			perDay[date] = day
+		}
+
 		summary.Total++
+		day.Count++
 		if s.CanSort {
 			summary.Sorted++
 			summary.ByCategory[s.Category]++
+			day.Sorted++
 		} else {
 			summary.Rejected++
 		}
-		perDay[s.ScannedAt.In(loc).Format(DateLayout)]++
 	}
 
-	for date, count := range perDay {
-		summary.PerDay = append(summary.PerDay, DayCount{Date: date, Count: count})
+	for _, day := range perDay {
+		summary.PerDay = append(summary.PerDay, *day)
 	}
 	sort.Slice(summary.PerDay, func(i, j int) bool { return summary.PerDay[i].Date < summary.PerDay[j].Date })
 	return summary
