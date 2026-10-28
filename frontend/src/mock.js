@@ -7,7 +7,7 @@ const USERS_KEY = 'raspberrybin_mock_users'
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/
 const MAX_FAILED_ATTEMPTS = 5
 const LOCK_MS = 5 * 60 * 1000
-const SESSION_MS = 30 * 24 * 60 * 60 * 1000
+const SESSION_MS = 8 * 60 * 60 * 1000
 
 function loadUsers() {
   try {
@@ -75,7 +75,7 @@ export async function login(username, password) {
   user.failedAttempts = 0
   user.lockedUntil = 0
   saveUsers(users)
-  return { token: crypto.randomUUID(), expires_at: new Date(Date.now() + SESSION_MS).toISOString() }
+  return { token: crypto.randomUUID(), expires_at: new Date(Date.now() + SESSION_MS).toISOString(), role: 'user' }
 }
 
 export async function logout() {
@@ -150,13 +150,13 @@ function seedHistory(username) {
 
 export const TEST_BIN_QR = {
   binId: 'bin-27',
-  qrToken: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  code: 'test-code-for-bin-27-abcdefghijk',
 }
 
-export async function startScan(binId, qrToken, username) {
+export async function startScan(binId, code, username) {
   await sleep(300)
-  if (binId !== TEST_BIN_QR.binId || qrToken !== TEST_BIN_QR.qrToken) {
-    throw new Error('invalid qr code')
+  if (binId !== TEST_BIN_QR.binId || code !== TEST_BIN_QR.code) {
+    throw new Error('invalid bin code')
   }
   const requestId = crypto.randomUUID()
   requests.set(requestId, { createdAt: Date.now(), result: randomResult(), username })
@@ -192,60 +192,62 @@ export async function getMyScans(username, limit, before) {
     .slice(0, limit)
 }
 
-export async function getMyStreak(username) {
-  await sleep(200)
-  const days = new Set(userScans(username).filter((scan) => scan.can_sort).map((scan) => dayKey(scan.scanned_at)))
-
-  const cursor = new Date()
-  if (!days.has(dayKey(cursor))) cursor.setDate(cursor.getDate() - 1)
-  let current = 0
-  while (days.has(dayKey(cursor))) {
-    current += 1
-    cursor.setDate(cursor.getDate() - 1)
-  }
-
-  const sorted = [...days].sort()
-  let best = 0
-  let run = 0
-  sorted.forEach((day, i) => {
-    run = i > 0 && nextDay(sorted[i - 1]) === day ? run + 1 : 1
-    best = Math.max(best, run)
-  })
-
-  const monday = new Date()
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
-  const week = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(monday)
-    day.setDate(monday.getDate() + i)
-    return days.has(dayKey(day))
-  })
-
-  return { current, best, last_day: sorted.at(-1) ?? null, week }
-}
-
 export async function getMyStats(username, from, to) {
   await sleep(200)
-  const scans = userScans(username).filter((scan) => {
+  const today = new Date()
+  const toKey = to ?? dayKey(today)
+  const fromKey = from ?? (() => {
+    const start = new Date(`${toKey}T12:00:00`)
+    start.setDate(start.getDate() - 29)
+    return dayKey(start)
+  })()
+
+  const all = userScans(username)
+  const scans = all.filter((scan) => {
     const day = dayKey(scan.scanned_at)
-    return (!from || day >= from) && (!to || day <= to)
+    return day >= fromKey && day <= toKey
   })
 
-  const byCategory = Object.fromEntries(CATEGORIES.map((category) => [category, 0]))
+  const byCategory = {}
   const perDay = new Map()
   for (const scan of scans) {
-    if (scan.can_sort) byCategory[scan.category] += 1
+    if (scan.can_sort) byCategory[scan.category] = (byCategory[scan.category] ?? 0) + 1
     const day = dayKey(scan.scanned_at)
-    perDay.set(day, (perDay.get(day) ?? 0) + 1)
+    const entry = perDay.get(day) ?? { count: 0, sorted: 0 }
+    entry.count += 1
+    if (scan.can_sort) entry.sorted += 1
+    perDay.set(day, entry)
   }
-
   const sorted = scans.filter((scan) => scan.can_sort).length
+
   return {
-    total: scans.length,
-    sorted,
-    rejected: scans.length - sorted,
-    by_category: byCategory,
-    per_day: [...perDay]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, count]) => ({ date, count })),
+    summary: {
+      total: scans.length,
+      sorted,
+      rejected: scans.length - sorted,
+      by_category: byCategory,
+      per_day: [...perDay]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, { count, sorted }]) => ({ date, count, sorted })),
+    },
+    streak: streakOf(all),
   }
+}
+
+function streakOf(scans) {
+  const days = [...new Set(scans.filter((scan) => scan.can_sort).map((scan) => dayKey(scan.scanned_at)))].sort()
+  let longest = 0
+  let run = 0
+  days.forEach((day, i) => {
+    run = i > 0 && nextDay(days[i - 1]) === day ? run + 1 : 1
+    longest = Math.max(longest, run)
+  })
+
+  const lastSortedDate = days.at(-1) ?? ''
+  const today = dayKey(new Date())
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const alive = lastSortedDate === today || lastSortedDate === dayKey(yesterday)
+
+  return { current: alive ? run : 0, longest, last_sorted_date: lastSortedDate }
 }

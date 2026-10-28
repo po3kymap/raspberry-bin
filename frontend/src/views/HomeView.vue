@@ -15,6 +15,7 @@ const REASONS = {
   unreadable_image: 'The photo could not be processed.',
   classifier_unavailable: 'The classifier is unavailable right now.',
   timeout: 'The bin did not respond in time.',
+  internal_error: 'Something went wrong on the server. Please try again.',
 }
 
 const state = ref('idle')
@@ -41,11 +42,11 @@ async function loadDashboard() {
 
 onMounted(loadDashboard)
 
-async function runScan({ binId, qrToken }) {
+async function runScan({ binId, code }) {
   state.value = 'scanning'
   error.value = ''
   try {
-    const { request_id } = await startScan(binId, qrToken)
+    const { request_id } = await startScan(binId, code)
     const response = await waitForScanResult(request_id)
     if (response.status === 'done') {
       result.value = response.result
@@ -55,7 +56,7 @@ async function runScan({ binId, qrToken }) {
       state.value = 'error'
     }
   } catch (e) {
-    error.value = e.message === 'invalid qr code' ? 'This QR code does not belong to a bin.' : e.message
+    error.value = e.message === 'invalid bin code' ? 'This QR code does not belong to a bin.' : e.message
     state.value = 'error'
   }
   loadDashboard()

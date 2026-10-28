@@ -25,30 +25,35 @@ async function request(path, options = {}) {
 
 export function register(username, password) {
   if (USE_MOCKS) return mock.register(username, password)
-  return request('/api/users/register', { method: 'POST', body: JSON.stringify({ username, password }) })
+  return request('/api/auth/register', { method: 'POST', body: JSON.stringify({ username, password }) })
 }
 
 export async function login(username, password) {
   const data = USE_MOCKS
     ? await mock.login(username, password)
-    : await request('/api/users/login', { method: 'POST', body: JSON.stringify({ username, password }) })
-  saveSession({ token: data.token, expires_at: data.expires_at, username: username.trim().toLowerCase() })
+    : await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+  saveSession({
+    token: data.token,
+    expires_at: data.expires_at,
+    username: username.trim().toLowerCase(),
+    role: data.role,
+  })
 }
 
 export async function logout() {
   try {
     if (USE_MOCKS) await mock.logout()
-    else await request('/api/users/logout', { method: 'POST' })
+    else await request('/api/auth/logout', { method: 'POST' })
   } finally {
     clearSession()
   }
 }
 
-export function startScan(binId, qrToken) {
-  if (USE_MOCKS) return mock.startScan(binId, qrToken, session.value?.username)
+export function startScan(binId, code) {
+  if (USE_MOCKS) return mock.startScan(binId, code, session.value?.username)
   return request('/api/scan-requests', {
     method: 'POST',
-    body: JSON.stringify({ bin_id: binId, qr_token: qrToken }),
+    body: JSON.stringify({ bin_id: binId, code }),
   })
 }
 
@@ -76,15 +81,35 @@ export function getMyScans({ limit = 20, before } = {}) {
   return request(`/api/me/scans?${params}`)
 }
 
-export function getMyStreak() {
-  if (USE_MOCKS) return mock.getMyStreak(session.value?.username)
-  return request('/api/me/streak')
-}
+const dayKey = (date) => date.toLocaleDateString('sv-SE')
 
-export function getMyStats({ from, to } = {}) {
+function fetchStats({ from, to } = {}) {
   if (USE_MOCKS) return mock.getMyStats(session.value?.username, from, to)
   const params = new URLSearchParams()
   if (from) params.set('from', from)
   if (to) params.set('to', to)
   return request(`/api/me/stats${params.size ? `?${params}` : ''}`)
+}
+
+export async function getMyStats(range) {
+  const { summary } = await fetchStats(range)
+  return summary
+}
+
+export async function getMyStreak() {
+  const today = new Date()
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7))
+
+  const { summary, streak } = await fetchStats({ from: dayKey(monday), to: dayKey(today) })
+  const activeDays = new Set(
+    summary.per_day.filter((day) => (day.sorted ?? day.count) > 0).map((day) => day.date),
+  )
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(monday)
+    day.setDate(monday.getDate() + i)
+    return activeDays.has(dayKey(day))
+  })
+
+  return { current: streak.current, best: streak.longest, last_day: streak.last_sorted_date || null, week }
 }
