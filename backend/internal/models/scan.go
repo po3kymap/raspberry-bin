@@ -1,6 +1,9 @@
 package models
 
-import "mime/multipart"
+import (
+	"mime/multipart"
+	"time"
+)
 
 type ScanRequest struct {
 	BinID string                `form:"bin_id" binding:"required"`
@@ -14,4 +17,14 @@ type ScanResponse struct {
 	Confidence float64 `json:"confidence"`
 	CanSort    bool    `json:"can_sort"`
 	Reason     string  `json:"reason,omitempty"`
+}
+
+// ScanResult is what the user sees. It never contains the image URL.
+type ScanResult struct {
+	Category   string    `json:"category" firestore:"category"`
+	Confidence float64   `json:"confidence" firestore:"confidence"`
+	CanSort    bool      `json:"can_sort" firestore:"can_sort"`
+	Reason     string    `json:"reason" firestore:"reason"`
+	BinID      string    `json:"bin_id" firestore:"bin_id"`
+	ScannedAt  time.Time `json:"scanned_at" firestore:"scanned_at"`
 }

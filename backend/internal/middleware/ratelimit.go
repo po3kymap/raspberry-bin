@@ -62,12 +62,50 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
+// Middleware limits requests per client IP.
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
+	return rl.MiddlewareByKey(func(c *gin.Context) string { return c.ClientIP() })
+}
+
+// MiddlewareByKey limits requests per key, e.g. per logged-in user, so that
+// many users behind one IP (a university network) do not block each other.
+func (rl *RateLimiter) MiddlewareByKey(key func(*gin.Context) string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !rl.getLimiter(c.ClientIP()).Allow() {
+		if !rl.getLimiter(key(c)).Allow() {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "too many requests"})
 			return
 		}
+		c.Next()
+	}
+}
+
+// MaxConcurrentPerIP limits how many requests from one IP may be in progress
+// at the same time. Long-polling requests stay open for up to 30 s, so without
+// this one client could open thousands of them.
+func MaxConcurrentPerIP(limit int) gin.HandlerFunc {
+	var mu sync.Mutex
+	active := make(map[string]int)
+
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+
+		mu.Lock()
+		if active[ip] >= limit {
+			mu.Unlock()
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "too many open requests"})
+			return
+		}
+		active[ip]++
+		mu.Unlock()
+
+		defer func() {
+			mu.Lock()
+			if active[ip]--; active[ip] == 0 {
+				delete(active, ip)
+			}
+			mu.Unlock()
+		}()
+
 		c.Next()
 	}
 }
