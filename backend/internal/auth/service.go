@@ -25,22 +25,31 @@ var (
 	ErrInvalidUsername    = errors.New("username must be 3-32 characters: a-z, 0-9, '.', '_' or '-'")
 
 	// Returned by the Store
-	ErrAdminNotFound   = errors.New("admin not found")
-	ErrAdminExists     = errors.New("admin already exists")
+	ErrUserNotFound    = errors.New("user not found")
+	ErrUserExists      = errors.New("username is already taken")
 	ErrSessionNotFound = errors.New("session not found")
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9._-]{3,32}$`)
 
-// Store is where admins and sessions are saved. The Firestore implementation
+// Store is where users and sessions are saved. The Firestore implementation
 // is in the repository package; tests use an in-memory one.
 type Store interface {
-	GetAdmin(ctx context.Context, username string) (*models.Admin, error)
-	CreateAdmin(ctx context.Context, admin models.Admin) error
-	UpdateLoginState(ctx context.Context, username string, failedAttempts int, lockedUntil time.Time) error
-	CreateSession(ctx context.Context, tokenHash string, session models.AdminSession) error
-	GetSession(ctx context.Context, tokenHash string) (*models.AdminSession, error)
+	GetUser(ctx context.Context, username string) (*models.User, error)
+	CreateUser(ctx context.Context, user models.User) error
+	// UpdateUser loads the user, applies fn and saves the result in one
+	// transaction, so concurrent updates (e.g. parallel failed logins) are never lost.
+	// fn may run more than once if the transaction is retried.
+	UpdateUser(ctx context.Context, username string, fn func(*models.User) error) error
+	CreateSession(ctx context.Context, tokenHash string, session models.Session) error
+	GetSession(ctx context.Context, tokenHash string) (*models.Session, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
+}
+
+type LoginResult struct {
+	Token     string
+	ExpiresAt time.Time
+	Role      string
 }
 
 type Service struct {
@@ -65,117 +74,151 @@ func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }
 
-// CreateAdmin checks the username and password strength, hashes the password and saves the admin.
+// Register creates a regular user account. Anyone can register; admins can
+// only be created on the server with CreateAdmin.
+func (s *Service) Register(ctx context.Context, username, password string) (string, error) {
+	return s.createUser(ctx, username, password, models.RoleUser)
+}
+
+// CreateAdmin is used by the create-admin command on the server.
 func (s *Service) CreateAdmin(ctx context.Context, username, password string) error {
+	_, err := s.createUser(ctx, username, password, models.RoleAdmin)
+	return err
+}
+
+func (s *Service) createUser(ctx context.Context, username, password, role string) (string, error) {
 	username = normalizeUsername(username)
 	if !usernamePattern.MatchString(username) {
-		return ErrInvalidUsername
+		return "", ErrInvalidUsername
 	}
 	if err := ValidatePasswordStrength(password); err != nil {
-		return err
+		return "", err
 	}
 
 	hash, err := HashPassword(password)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return s.store.CreateAdmin(ctx, models.Admin{
+	err = s.store.CreateUser(ctx, models.User{
 		Username:     username,
 		PasswordHash: hash,
+		Role:         role,
 		CreatedAt:    s.now(),
 	})
+	if err != nil {
+		return "", err
+	}
+	return username, nil
 }
 
 // Login checks the password and returns a new session token.
-func (s *Service) Login(ctx context.Context, username, password string) (token string, expiresAt time.Time, err error) {
+func (s *Service) Login(ctx context.Context, username, password string) (*LoginResult, error) {
 	username = normalizeUsername(username)
 
-	admin, err := s.store.GetAdmin(ctx, username)
-	if errors.Is(err, ErrAdminNotFound) {
+	user, err := s.store.GetUser(ctx, username)
+	if errors.Is(err, ErrUserNotFound) {
 		CheckPassword(s.dummyHash, password)
-		return "", time.Time{}, ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 
 	now := s.now()
 
 	// While locked, even the correct password is refused
-	if now.Before(admin.LockedUntil) {
-		return "", time.Time{}, ErrAccountLocked
+	if now.Before(user.LockedUntil) {
+		return nil, ErrAccountLocked
 	}
 
-	if !CheckPassword(admin.PasswordHash, password) {
-		return "", time.Time{}, s.recordFailedLogin(ctx, admin, now)
+	// The bcrypt check is slow, so it runs outside the transaction
+	if !CheckPassword(user.PasswordHash, password) {
+		return nil, s.recordFailedLogin(ctx, username, now)
 	}
 
 	// Successful login clears earlier failed attempts
-	if admin.FailedAttempts > 0 || !admin.LockedUntil.IsZero() {
-		if err := s.store.UpdateLoginState(ctx, username, 0, time.Time{}); err != nil {
-			return "", time.Time{}, err
+	if user.FailedAttempts > 0 || !user.LockedUntil.IsZero() {
+		err := s.store.UpdateUser(ctx, username, func(u *models.User) error {
+			u.FailedAttempts = 0
+			u.LockedUntil = time.Time{}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	token, tokenHash, err := NewSessionToken()
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 
-	expiresAt = now.Add(SessionDuration)
-	err = s.store.CreateSession(ctx, tokenHash, models.AdminSession{
+	expiresAt := now.Add(SessionDuration)
+	err = s.store.CreateSession(ctx, tokenHash, models.Session{
 		Username:  username,
+		Role:      user.Role,
 		CreatedAt: now,
 		ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
-	return token, expiresAt, nil
+	return &LoginResult{Token: token, ExpiresAt: expiresAt, Role: user.Role}, nil
 }
 
 // recordFailedLogin counts a wrong password and locks the account on the 5th one.
-// It returns the error the caller should give back to the client.
-func (s *Service) recordFailedLogin(ctx context.Context, admin *models.Admin, now time.Time) error {
-	attempts := admin.FailedAttempts + 1
-	var lockedUntil time.Time
+// The counter is read and written in one transaction, so parallel wrong
+// passwords are all counted. It returns the error to give back to the client.
+func (s *Service) recordFailedLogin(ctx context.Context, username string, now time.Time) error {
+	var locked bool
 
-	if attempts >= MaxFailedAttempts {
-		lockedUntil = now.Add(LockDuration)
-		attempts = 0 // start counting again after the lock ends
-	}
+	err := s.store.UpdateUser(ctx, username, func(u *models.User) error {
+		locked = false
+		if now.Before(u.LockedUntil) {
+			// Another request locked the account in the meantime
+			locked = true
+			return nil
+		}
 
-	if err := s.store.UpdateLoginState(ctx, admin.Username, attempts, lockedUntil); err != nil {
+		u.FailedAttempts++
+		if u.FailedAttempts >= MaxFailedAttempts {
+			u.LockedUntil = now.Add(LockDuration)
+			u.FailedAttempts = 0 // start counting again after the lock ends
+			locked = true
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	if !lockedUntil.IsZero() {
+	if locked {
 		return ErrAccountLocked
 	}
 	return ErrInvalidCredentials
 }
 
-// ValidateSession returns the admin's username if the token belongs to a session that has not expired.
-func (s *Service) ValidateSession(ctx context.Context, token string) (string, error) {
+// ValidateSession returns the session if the token belongs to one that has not expired.
+func (s *Service) ValidateSession(ctx context.Context, token string) (*models.Session, error) {
 	if token == "" {
-		return "", ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
 
 	tokenHash := HashToken(token)
 	session, err := s.store.GetSession(ctx, tokenHash)
 	if errors.Is(err, ErrSessionNotFound) {
-		return "", ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if !s.now().Before(session.ExpiresAt) {
 		// Clean up the expired session; the result does not matter
 		_ = s.store.DeleteSession(ctx, tokenHash)
-		return "", ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
-	return session.Username, nil
+	return session, nil
 }
 
 // Logout ends the session, so the token can no longer be used.

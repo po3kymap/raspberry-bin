@@ -12,6 +12,7 @@ import (
 	"raspberry-bin-api/internal/clients"
 	"raspberry-bin-api/internal/handlers"
 	"raspberry-bin-api/internal/middleware"
+	"raspberry-bin-api/internal/models"
 	"raspberry-bin-api/internal/repository"
 	"raspberry-bin-api/internal/storage"
 
@@ -70,8 +71,8 @@ func main() {
 
 	scanHandler := handlers.NewScanHandler(scanRepo, aiClient, fileStorage)
 
-	authService := auth.NewService(repository.NewAdminRepository(firebaseApp.DB))
-	adminHandler := handlers.NewAdminHandler(authService)
+	authService := auth.NewService(repository.NewUserRepository(firebaseApp.DB))
+	authHandler := handlers.NewAuthHandler(authService)
 
 	r := gin.Default()
 	r.MaxMultipartMemory = maxScanBodySize
@@ -94,16 +95,28 @@ func main() {
 		api.POST("/scan", middleware.MaxBodySize(maxScanBodySize), scanHandler.HandleScan)
 	}
 
-	// Admin routes are used by the web dashboard, so they use admin sessions
-	// instead of the device API key. Login gets its own, stricter rate limit
-	// on top of the 5-attempt account lock.
+	// Accounts. Login and register get their own, stricter rate limits on top
+	// of the 5-attempt account lock.
 	loginLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 5)
-	r.POST("/api/admin/login", loginLimiter.Middleware(), middleware.MaxBodySize(maxLoginBodySize), adminHandler.Login)
+	registerLimiter := middleware.NewRateLimiter(rate.Every(10*time.Second), 3)
+	jsonBody := middleware.MaxBodySize(maxLoginBodySize)
 
-	admin := r.Group("/api/admin", middleware.RequireAdmin(authService))
+	authRoutes := r.Group("/api/auth")
 	{
-		admin.GET("/me", adminHandler.Me)
-		admin.POST("/logout", adminHandler.Logout)
+		authRoutes.POST("/register", registerLimiter.Middleware(), jsonBody, authHandler.Register)
+		authRoutes.POST("/login", loginLimiter.Middleware(), jsonBody, authHandler.Login)
+
+		session := authRoutes.Group("", middleware.RequireSession(authService))
+		session.POST("/logout", authHandler.Logout)
+		session.GET("/me", authHandler.Me)
+	}
+
+	// Admins. The role is checked on every request, so a user token never opens these.
+	r.POST("/api/admin/login", loginLimiter.Middleware(), jsonBody, authHandler.AdminLogin)
+	admin := r.Group("/api/admin", middleware.RequireSession(authService), middleware.RequireRole(models.RoleAdmin))
+	{
+		admin.GET("/me", authHandler.Me)
+		admin.POST("/logout", authHandler.Logout)
 	}
 
 	r.Run(":" + port)

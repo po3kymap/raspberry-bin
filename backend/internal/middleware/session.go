@@ -8,15 +8,19 @@ import (
 	"strings"
 
 	"raspberry-bin-api/internal/auth"
+	"raspberry-bin-api/internal/models"
 
 	"github.com/gin-gonic/gin"
 )
 
-// AdminUsernameKey is where RequireAdmin stores the logged-in admin's username in the Gin context.
-const AdminUsernameKey = "admin_username"
+// Keys under which RequireSession stores the logged-in user in the Gin context.
+const (
+	UsernameKey = "username"
+	RoleKey     = "role"
+)
 
 type SessionValidator interface {
-	ValidateSession(ctx context.Context, token string) (string, error)
+	ValidateSession(ctx context.Context, token string) (*models.Session, error)
 }
 
 // BearerToken extracts the token from an "Authorization: Bearer <token>" header.
@@ -29,9 +33,9 @@ func BearerToken(header string) (string, bool) {
 	return token, token != ""
 }
 
-// RequireAdmin lets the request through only with a valid admin session token.
-// It runs on every protected request, as required by the RAD.
-func RequireAdmin(sessions SessionValidator) gin.HandlerFunc {
+// RequireSession lets the request through only with a valid session token
+// and stores the username and role for the next handlers.
+func RequireSession(sessions SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, ok := BearerToken(c.GetHeader("Authorization"))
 		if !ok {
@@ -39,7 +43,7 @@ func RequireAdmin(sessions SessionValidator) gin.HandlerFunc {
 			return
 		}
 
-		username, err := sessions.ValidateSession(c.Request.Context(), token)
+		session, err := sessions.ValidateSession(c.Request.Context(), token)
 		if errors.Is(err, auth.ErrInvalidSession) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
@@ -50,7 +54,20 @@ func RequireAdmin(sessions SessionValidator) gin.HandlerFunc {
 			return
 		}
 
-		c.Set(AdminUsernameKey, username)
+		c.Set(UsernameKey, session.Username)
+		c.Set(RoleKey, session.Role)
+		c.Next()
+	}
+}
+
+// RequireRole must run after RequireSession. A logged-in user without the
+// role gets 403, so a regular user's token never opens admin routes.
+func RequireRole(role string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString(RoleKey) != role {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
 		c.Next()
 	}
 }

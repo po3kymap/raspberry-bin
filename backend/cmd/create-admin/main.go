@@ -58,7 +58,7 @@ func main() {
 	)
 	defer firebaseApp.DB.Close()
 
-	authService := auth.NewService(repository.NewAdminRepository(firebaseApp.DB))
+	authService := auth.NewService(repository.NewUserRepository(firebaseApp.DB))
 	if err := authService.CreateAdmin(context.Background(), *username, password); err != nil {
 		log.Fatalf("could not create admin: %v", err)
 	}
