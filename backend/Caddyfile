@@ -12,8 +12,10 @@
 		# The web app may use the camera (QR scanning), nothing else
 		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 		# Only our own scripts, styles and API; this limits the damage of an XSS
-		# bug, which matters because the session token lives in the browser
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		# bug, which matters because the session token lives in the browser.
+		# worker-src blob: is needed by the QR scanner library, which decodes in a
+		# blob: worker on browsers without a built-in QR detector (iPhone Safari).
+		Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		-Server
 	}
 
