@@ -7,6 +7,7 @@ require (
 	firebase.google.com/go/v4 v4.22.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.52.0
 	golang.org/x/term v0.47.0
 	golang.org/x/time v0.15.0
