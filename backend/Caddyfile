@@ -8,8 +8,28 @@
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# The web app may use the camera (QR scanning), nothing else
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		# Only our own scripts, styles and API; this limits the damage of an XSS
+		# bug, which matters because the session token lives in the browser
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		-Server
 	}
 
-	reverse_proxy api:8080
+	# API and health check go to the Go backend; same origin, so no CORS
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+	handle /health {
+		reverse_proxy api:8080
+	}
+
+	# Everything else is the built web app (frontend/dist). Unknown paths get
+	# index.html, so Vue's router can handle URLs like /history.
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
 }

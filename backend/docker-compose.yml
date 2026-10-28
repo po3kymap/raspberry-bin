@@ -59,6 +59,8 @@ services:
       - web
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Built web app (npm run build in frontend/)
+      - ../frontend/dist:/srv/frontend:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
