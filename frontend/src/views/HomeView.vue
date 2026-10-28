@@ -1,8 +1,10 @@
 <script setup>
-import { ref } from 'vue'
-import { startScan, waitForScanResult } from '../api.js'
+import { onMounted, ref } from 'vue'
+import { getMyScans, getMyStreak, startScan, waitForScanResult } from '../api.js'
 import { categoryInfo } from '../categories.js'
 import QrScanner from '../components/QrScanner.vue'
+import RecentScans from '../components/RecentScans.vue'
+import StreakCard from '../components/StreakCard.vue'
 import { TEST_BIN_QR } from '../mock.js'
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
@@ -18,6 +20,26 @@ const REASONS = {
 const state = ref('idle')
 const result = ref(null)
 const error = ref('')
+
+const streak = ref(null)
+const recentScans = ref([])
+const dashboardLoaded = ref(false)
+const dashboardError = ref('')
+
+async function loadDashboard() {
+  try {
+    const [streakData, scans] = await Promise.all([getMyStreak(), getMyScans({ limit: 5 })])
+    streak.value = streakData
+    recentScans.value = scans
+    dashboardError.value = ''
+  } catch {
+    dashboardError.value = 'Could not load your activity. Try again later.'
+  } finally {
+    dashboardLoaded.value = true
+  }
+}
+
+onMounted(loadDashboard)
 
 async function runScan({ binId, qrToken }) {
   state.value = 'scanning'
@@ -36,6 +58,7 @@ async function runScan({ binId, qrToken }) {
     error.value = e.message === 'invalid qr code' ? 'This QR code does not belong to a bin.' : e.message
     state.value = 'error'
   }
+  loadDashboard()
 }
 
 function reset() {
@@ -99,5 +122,13 @@ function reset() {
         Try again
       </button>
     </div>
+
+    <template v-if="state !== 'qr' && dashboardLoaded">
+      <p v-if="dashboardError" class="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{{ dashboardError }}</p>
+      <template v-else>
+        <StreakCard :streak="streak" />
+        <RecentScans :scans="recentScans" />
+      </template>
+    </template>
   </section>
 </template>
