@@ -45,7 +45,7 @@ export async function logout() {
 }
 
 export function startScan(binId, qrToken) {
-  if (USE_MOCKS) return mock.startScan(binId, qrToken)
+  if (USE_MOCKS) return mock.startScan(binId, qrToken, session.value?.username)
   return request('/api/scan-requests', {
     method: 'POST',
     body: JSON.stringify({ bin_id: binId, qr_token: qrToken }),
@@ -69,12 +69,22 @@ export async function waitForScanResult(requestId, timeoutMs = 30000) {
   return { status: 'failed', reason: 'timeout' }
 }
 
-export function getRecentScans(limit = 20) {
-  if (USE_MOCKS) return mock.getRecentScans(limit)
-  return request(`/api/scans?limit=${limit}`)
+export function getMyScans({ limit = 20, before } = {}) {
+  if (USE_MOCKS) return mock.getMyScans(session.value?.username, limit, before)
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before) params.set('before', before)
+  return request(`/api/me/scans?${params}`)
 }
 
-export function getStats() {
-  if (USE_MOCKS) return mock.getStats()
-  return request('/api/stats')
+export function getMyStreak() {
+  if (USE_MOCKS) return mock.getMyStreak(session.value?.username)
+  return request('/api/me/streak')
+}
+
+export function getMyStats({ from, to } = {}) {
+  if (USE_MOCKS) return mock.getMyStats(session.value?.username, from, to)
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return request(`/api/me/stats${params.size ? `?${params}` : ''}`)
 }
