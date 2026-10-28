@@ -4,6 +4,84 @@ const scans = []
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const USERS_KEY = 'raspberrybin_mock_users'
+const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/
+const MAX_FAILED_ATTEMPTS = 5
+const LOCK_MS = 5 * 60 * 1000
+const SESSION_MS = 30 * 24 * 60 * 60 * 1000
+
+function loadUsers() {
+  try {
+    return JSON.parse(localStorage.getItem(USERS_KEY)) || {}
+  } catch {
+    return {}
+  }
+}
+
+function saveUsers(users) {
+  try {
+    localStorage.setItem(USERS_KEY, JSON.stringify(users))
+  } catch {}
+}
+
+async function hash(text) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function checkPasswordStrength(password) {
+  if (password.length < 12) throw new Error('weak password: must be at least 12 characters')
+  if (password.length > 72) throw new Error('weak password: must be at most 72 bytes')
+  if (!/\p{L}/u.test(password) || !/\p{N}/u.test(password)) {
+    throw new Error('weak password: must contain both letters and digits')
+  }
+}
+
+export async function register(username, password) {
+  await wait(300)
+  const name = username.trim().toLowerCase()
+  if (!USERNAME_PATTERN.test(name)) {
+    throw new Error("username must be 3-32 characters: a-z, 0-9, '.', '_' or '-'")
+  }
+  checkPasswordStrength(password)
+
+  const users = loadUsers()
+  if (users[name]) throw new Error('username is already taken')
+  users[name] = { passwordHash: await hash(password), failedAttempts: 0, lockedUntil: 0 }
+  saveUsers(users)
+  return { username: name }
+}
+
+export async function login(username, password) {
+  await wait(300)
+  const name = username.trim().toLowerCase()
+  const users = loadUsers()
+  const user = users[name]
+  if (!user) throw new Error('invalid username or password')
+  if (Date.now() < user.lockedUntil) throw new Error('too many failed attempts, try again later')
+
+  if (user.passwordHash !== (await hash(password))) {
+    user.failedAttempts += 1
+    if (user.failedAttempts >= MAX_FAILED_ATTEMPTS) {
+      user.failedAttempts = 0
+      user.lockedUntil = Date.now() + LOCK_MS
+      saveUsers(users)
+      throw new Error('too many failed attempts, try again later')
+    }
+    saveUsers(users)
+    throw new Error('invalid username or password')
+  }
+
+  user.failedAttempts = 0
+  user.lockedUntil = 0
+  saveUsers(users)
+  return { token: crypto.randomUUID(), expires_at: new Date(Date.now() + SESSION_MS).toISOString() }
+}
+
+export async function logout() {
+  await wait(100)
+}
+
 function randomResult() {
   const roll = Math.random()
   if (roll < 0.15) {
