@@ -94,8 +94,16 @@ function randomResult() {
   return { category, confidence: 0.9 + Math.random() * 0.09, can_sort: true, reason: '' }
 }
 
-export async function startScan() {
+export const TEST_BIN_QR = {
+  binId: 'bin-27',
+  qrToken: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+}
+
+export async function startScan(binId, qrToken) {
   await sleep(300)
+  if (binId !== TEST_BIN_QR.binId || qrToken !== TEST_BIN_QR.qrToken) {
+    throw new Error('invalid qr code')
+  }
   const requestId = crypto.randomUUID()
   requests.set(requestId, { createdAt: Date.now(), result: randomResult() })
   return { request_id: requestId }

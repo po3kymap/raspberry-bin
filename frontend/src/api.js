@@ -2,7 +2,6 @@ import { clearSession, saveSession, session } from './auth.js'
 import * as mock from './mock.js'
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
-const BIN_ID = 'bin-27'
 
 async function request(path, options = {}) {
   const token = session.value?.token
@@ -45,9 +44,12 @@ export async function logout() {
   }
 }
 
-export function startScan() {
-  if (USE_MOCKS) return mock.startScan()
-  return request('/api/scan-requests', { method: 'POST', body: JSON.stringify({ bin_id: BIN_ID }) })
+export function startScan(binId, qrToken) {
+  if (USE_MOCKS) return mock.startScan(binId, qrToken)
+  return request('/api/scan-requests', {
+    method: 'POST',
+    body: JSON.stringify({ bin_id: binId, qr_token: qrToken }),
+  })
 }
 
 export function getScanRequest(requestId, wait = 25) {
