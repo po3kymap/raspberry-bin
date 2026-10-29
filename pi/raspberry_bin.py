@@ -204,7 +204,7 @@ def main():
         camera = Camera(
             int(setting("RBIN_PHOTO_WIDTH", "1024")),
             int(setting("RBIN_PHOTO_HEIGHT", "768")),
-            int(setting("RBIN_CAMERA_ROTATION", "180")),
+            int(setting("RBIN_CAMERA_ROTATION", "0")),
         )
 
     client = BinClient(
