@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"time"
 
+	"raspberry-bin-api/internal/activity"
 	"raspberry-bin-api/internal/clients"
 	"raspberry-bin-api/internal/dispatch"
 	"raspberry-bin-api/internal/models"
@@ -38,14 +39,16 @@ type ScanHandler struct {
 	AIClient   *clients.AIClient
 	Storage    *storage.FileStorage
 	Dispatcher *dispatch.Dispatcher
+	Activity   *activity.Recorder
 }
 
-func NewScanHandler(repo *repository.ScanRepository, aiClient *clients.AIClient, fileStorage *storage.FileStorage, dispatcher *dispatch.Dispatcher) *ScanHandler {
+func NewScanHandler(repo *repository.ScanRepository, aiClient *clients.AIClient, fileStorage *storage.FileStorage, dispatcher *dispatch.Dispatcher, recorder *activity.Recorder) *ScanHandler {
 	return &ScanHandler{
 		Repo:       repo,
 		AIClient:   aiClient,
 		Storage:    fileStorage,
 		Dispatcher: dispatcher,
+		Activity:   recorder,
 	}
 }
 
@@ -134,7 +137,7 @@ func (h *ScanHandler) HandleScan(c *gin.Context) {
 		return
 	}
 
-	imageURL, err := h.Storage.UploadImage(req.Image, contentType)
+	imageURL, imageID, err := h.Storage.UploadImage(req.Image, contentType)
 	if err != nil {
 		log.Printf("[ERROR] image upload failed: %v", err)
 		h.Dispatcher.Fail(req.RequestID, "internal_error")
@@ -158,7 +161,7 @@ func (h *ScanHandler) HandleScan(c *gin.Context) {
 		ScannedAt:  time.Now().UTC(),
 	}
 
-	err = h.Repo.SaveScan(c.Request.Context(), repository.StoredScan{
+	scanID, err := h.Repo.SaveScan(c.Request.Context(), repository.StoredScan{
 		ScanResult: result,
 		Username:   username,
 		RequestID:  req.RequestID,
@@ -172,6 +175,17 @@ func (h *ScanHandler) HandleScan(c *gin.Context) {
 	}
 
 	h.Dispatcher.Complete(req.RequestID, result)
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type:       activity.Scan,
+		Username:   username,
+		BinID:      req.BinID,
+		ScanID:     scanID,
+		ImageID:    imageID,
+		Category:   result.Category,
+		Confidence: result.Confidence,
+		CanSort:    result.CanSort,
+		Reason:     result.Reason,
+	})
 
 	c.JSON(http.StatusOK, models.ScanResponse{
 		BinID:      req.BinID,

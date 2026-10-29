@@ -1,4 +1,5 @@
 import { clearSession, saveSession, session } from './auth.js'
+import { disconnectBin } from './bin.js'
 import * as mock from './mock.js'
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
@@ -42,10 +43,11 @@ export async function login(username, password) {
 
 export async function logout() {
   try {
-    if (USE_MOCKS) await mock.logout()
+    if (USE_MOCKS) await mock.logout(session.value?.username, session.value?.role)
     else await request('/api/auth/logout', { method: 'POST' })
   } finally {
     clearSession()
+    disconnectBin()
   }
 }
 
@@ -112,4 +114,78 @@ export async function getMyStreak() {
   })
 
   return { current: streak.current, best: streak.longest, last_day: streak.last_sorted_date || null, week }
+}
+
+// Admin
+
+export function getUsers() {
+  if (USE_MOCKS) return mock.listUsers()
+  return request('/api/admin/users')
+}
+
+export function createUser({ username, password, role }) {
+  if (USE_MOCKS) return mock.createUser(username, password, role, session.value?.username)
+  return request('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, role }) })
+}
+
+export function deleteUser(username) {
+  if (USE_MOCKS) return mock.deleteUser(username, session.value?.username)
+  return request(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+}
+
+export function getAdminStats({ from, to, binId } = {}) {
+  if (USE_MOCKS) return mock.getAdminStats(from, to, binId)
+  const params = new URLSearchParams()
+  if (binId) params.set('bin_id', binId)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return request(`/api/admin/stats${params.size ? `?${params}` : ''}`)
+}
+
+export function connectBin(binId, code) {
+  if (USE_MOCKS) return mock.connectBin(binId, code, session.value?.username)
+  return request('/api/admin/bins/connect', { method: 'POST', body: JSON.stringify({ bin_id: binId, code }) })
+}
+
+// action is "open" or "close"; the bin receives the command within a second
+export function setLid(binId, compartment, action) {
+  if (USE_MOCKS) return mock.setLid(binId, compartment, action, session.value?.username)
+  return request(`/api/admin/lids/${compartment}/${action}`, { method: 'POST', body: JSON.stringify({ bin_id: binId }) })
+}
+
+export function getActivity({ limit = 20, before } = {}) {
+  if (USE_MOCKS) return mock.getActivity(limit, before)
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before) params.set('before', before)
+  return request(`/api/admin/activity?${params}`)
+}
+
+// Photo of a scan as a blob: URL for <img>, or null when there is none.
+// Fetched with the session token because <img src> cannot send it.
+export async function getScanImageUrl(imageId) {
+  if (USE_MOCKS) return null
+  const file = imageId.replace(/^scans\//, '')
+  const response = await fetch(`/api/admin/images/${encodeURIComponent(file)}`, {
+    headers: { Authorization: `Bearer ${session.value?.token}` },
+  })
+  if (response.status === 401) clearSession()
+  if (!response.ok) return null
+  return URL.createObjectURL(await response.blob())
+}
+
+// Photo check with the phone camera: which bin does this item belong in?
+export async function checkItem(image) {
+  if (USE_MOCKS) return mock.checkItem()
+  const form = new FormData()
+  form.append('image', image, 'item.jpg')
+  // No Content-Type header: the browser sets the multipart boundary itself
+  const response = await fetch('/api/check', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.value?.token}` },
+    body: form,
+  })
+  const data = await response.json().catch(() => null)
+  if (response.status === 401) clearSession()
+  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+  return data
 }

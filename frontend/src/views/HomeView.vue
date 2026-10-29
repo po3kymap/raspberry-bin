@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { getMyScans, getMyStreak, startScan, waitForScanResult } from '../api.js'
 import { categoryInfo } from '../categories.js'
+import ItemCheck from '../components/ItemCheck.vue'
 import QrScanner from '../components/QrScanner.vue'
 import RecentScans from '../components/RecentScans.vue'
 import StreakCard from '../components/StreakCard.vue'
@@ -123,6 +124,8 @@ function reset() {
         Try again
       </button>
     </div>
+
+    <ItemCheck v-if="state === 'idle'" />
 
     <template v-if="state !== 'qr' && dashboardLoaded">
       <p v-if="dashboardError" class="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{{ dashboardError }}</p>

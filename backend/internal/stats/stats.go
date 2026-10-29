@@ -12,6 +12,9 @@ import (
 
 const DateLayout = "2006-01-02"
 
+// How many of the most active users the admin overview lists
+const topUsersCount = 5
+
 // UpdateStreak counts a sorted item on `day` (a DateLayout date).
 // Several items on the same day count once; a day without items resets it.
 func UpdateStreak(user *models.User, day string) {
@@ -93,4 +96,94 @@ func Summarize(scans []models.ScanResult, loc *time.Location) Summary {
 	}
 	sort.Slice(summary.PerDay, func(i, j int) bool { return summary.PerDay[i].Date < summary.PerDay[j].Date })
 	return summary
+}
+
+// UserScan is a scan together with the user who made it.
+type UserScan struct {
+	Scan     models.ScanResult
+	Username string
+}
+
+type UserCount struct {
+	Username string `json:"username"`
+	Total    int    `json:"total"`
+	Sorted   int    `json:"sorted"`
+}
+
+// Overview is the admin view of all scans: the usual summary plus why items
+// were rejected, which bins were used, how sure the model was and which users
+// were active.
+type Overview struct {
+	Summary
+	ByReason map[string]int `json:"by_reason"`
+	ByBin    map[string]int `json:"by_bin"`
+	// Average model confidence of the sorted items (0 when nothing was sorted)
+	AverageConfidence float64     `json:"average_confidence"`
+	ActiveUsers       int         `json:"active_users"`
+	TopUsers          []UserCount `json:"top_users"`
+}
+
+// SummarizeOverview computes the admin statistics over the scans of all users.
+func SummarizeOverview(scans []UserScan, loc *time.Location) Overview {
+	results := make([]models.ScanResult, len(scans))
+	for i, s := range scans {
+		results[i] = s.Scan
+	}
+
+	overview := Overview{
+		Summary:  Summarize(results, loc),
+		ByReason: map[string]int{},
+		ByBin:    map[string]int{},
+		TopUsers: []UserCount{},
+	}
+
+	perUser := map[string]*UserCount{}
+	var confidenceSum float64
+	for _, s := range scans {
+		overview.ByBin[s.Scan.BinID]++
+
+		if s.Scan.CanSort {
+			confidenceSum += s.Scan.Confidence
+		} else {
+			reason := s.Scan.Reason
+			if reason == "" {
+				reason = "unknown"
+			}
+			overview.ByReason[reason]++
+		}
+
+		user, ok := perUser[s.Username]
+		if !ok {
+			user = &UserCount{Username: s.Username}
+			perUser[s.Username] = user
+		}
+		user.Total++
+		if s.Scan.CanSort {
+			user.Sorted++
+		}
+	}
+
+	if overview.Sorted > 0 {
+		overview.AverageConfidence = confidenceSum / float64(overview.Sorted)
+	}
+
+	overview.ActiveUsers = len(perUser)
+	for _, user := range perUser {
+		overview.TopUsers = append(overview.TopUsers, *user)
+	}
+	// Most sorted items first; ties by all scans, then by name so the order is stable
+	sort.Slice(overview.TopUsers, func(i, j int) bool {
+		a, b := overview.TopUsers[i], overview.TopUsers[j]
+		if a.Sorted != b.Sorted {
+			return a.Sorted > b.Sorted
+		}
+		if a.Total != b.Total {
+			return a.Total > b.Total
+		}
+		return a.Username < b.Username
+	})
+	if len(overview.TopUsers) > topUsersCount {
+		overview.TopUsers = overview.TopUsers[:topUsersCount]
+	}
+	return overview
 }

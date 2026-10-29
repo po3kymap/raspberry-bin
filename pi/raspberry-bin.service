@@ -1,0 +1,29 @@
+# systemd service: starts the client when the Pi boots and restarts it if it stops.
+# Install:
+#   sudo cp raspberry-bin.service /etc/systemd/system/
+#   sudo systemctl enable --now raspberry-bin
+# Logs:
+#   journalctl -u raspberry-bin -f
+
+[Unit]
+Description=Raspberry Bin client
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pi
+# Settings and the device key; the file is readable only by root, systemd
+# reads it before switching to the pi user
+EnvironmentFile=/etc/raspberry-bin.env
+ExecStart=/usr/bin/python3 /home/pi/raspberry-bin/raspberry_bin.py
+Restart=always
+RestartSec=5
+
+# Limit what the program can do if it is ever compromised
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

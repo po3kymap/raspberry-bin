@@ -84,6 +84,60 @@ func TestSummarizeCountsDaysInLocalTime(t *testing.T) {
 	}
 }
 
+func TestSummarizeOverview(t *testing.T) {
+	at := time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)
+	scans := []UserScan{
+		{Username: "alice", Scan: models.ScanResult{Category: "PMD", Confidence: 0.9, CanSort: true, BinID: "bin-1", ScannedAt: at}},
+		{Username: "alice", Scan: models.ScanResult{Category: "PAPER", Confidence: 0.7, CanSort: true, BinID: "bin-1", ScannedAt: at}},
+		{Username: "bob", Scan: models.ScanResult{Category: "UNSUPPORTED", CanSort: false, Reason: "unsupported_item", BinID: "bin-2", ScannedAt: at}},
+		{Username: "bob", Scan: models.ScanResult{Category: "unknown", CanSort: false, BinID: "bin-1", ScannedAt: at}},
+		{Username: "carol", Scan: models.ScanResult{Category: "ORGANIC", Confidence: 0.8, CanSort: true, BinID: "bin-2", ScannedAt: at}},
+	}
+
+	o := SummarizeOverview(scans, time.UTC)
+
+	if o.Total != 5 || o.Sorted != 3 || o.Rejected != 2 {
+		t.Errorf("total/sorted/rejected = %d/%d/%d, want 5/3/2", o.Total, o.Sorted, o.Rejected)
+	}
+	if o.ByReason["unsupported_item"] != 1 || o.ByReason["unknown"] != 1 || len(o.ByReason) != 2 {
+		t.Errorf("by_reason = %v, want unsupported_item 1 and unknown 1 (empty reason)", o.ByReason)
+	}
+	if o.ByBin["bin-1"] != 3 || o.ByBin["bin-2"] != 2 {
+		t.Errorf("by_bin = %v, want bin-1 3, bin-2 2", o.ByBin)
+	}
+	// Only the sorted items count: (0.9 + 0.7 + 0.8) / 3
+	if o.AverageConfidence < 0.7999 || o.AverageConfidence > 0.8001 {
+		t.Errorf("average_confidence = %v, want 0.8", o.AverageConfidence)
+	}
+	if o.ActiveUsers != 3 {
+		t.Errorf("active_users = %d, want 3", o.ActiveUsers)
+	}
+	// Most sorted items first: bob has more scans than carol but nothing sorted
+	want := []UserCount{{"alice", 2, 2}, {"carol", 1, 1}, {"bob", 2, 0}}
+	if len(o.TopUsers) != 3 || o.TopUsers[0] != want[0] || o.TopUsers[1] != want[1] || o.TopUsers[2] != want[2] {
+		t.Errorf("top_users = %v, want %v", o.TopUsers, want)
+	}
+}
+
+func TestSummarizeOverviewKeepsFiveTopUsers(t *testing.T) {
+	var scans []UserScan
+	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		scans = append(scans, UserScan{Username: name, Scan: models.ScanResult{CanSort: true, Category: "PMD"}})
+	}
+
+	o := SummarizeOverview(scans, time.UTC)
+	if o.ActiveUsers != 7 || len(o.TopUsers) != 5 || o.TopUsers[0].Username != "a" {
+		t.Errorf("active = %d, top = %v; want 7 active, 5 listed starting with a", o.ActiveUsers, o.TopUsers)
+	}
+}
+
+func TestSummarizeOverviewEmpty(t *testing.T) {
+	o := SummarizeOverview(nil, time.UTC)
+	if o.Total != 0 || o.AverageConfidence != 0 || o.ByReason == nil || o.ByBin == nil || o.TopUsers == nil {
+		t.Errorf("empty overview = %+v, want zeros and empty (not null) lists", o)
+	}
+}
+
 func TestSummarizeEmpty(t *testing.T) {
 	s := Summarize(nil, time.UTC)
 	if s.Total != 0 || s.ByCategory == nil || s.PerDay == nil {
