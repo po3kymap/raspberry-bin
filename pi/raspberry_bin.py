@@ -192,7 +192,7 @@ class BinClient:
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    server = setting("RBIN_SERVER_URL", "https://raspberry-bin-27.swedencentral.cloudapp.azure.com")
+    server = setting("RBIN_SERVER_URL", "https://raspberrybin.app")
     if not server.startswith("https://"):
         sys.exit("RBIN_SERVER_URL must use https://")
 

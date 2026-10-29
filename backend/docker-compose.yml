@@ -57,6 +57,8 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      # Previous address that redirects to DOMAIN; a .localhost name means "none"
+      OLD_DOMAIN: ${OLD_DOMAIN:-old.localhost}
     networks:
       - web
     volumes:

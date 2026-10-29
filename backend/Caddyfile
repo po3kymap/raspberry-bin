@@ -35,3 +35,10 @@
 		file_server
 	}
 }
+
+# www and the previous address (OLD_DOMAIN) send visitors to the main domain,
+# so old links and bookmarks keep working
+www.{$DOMAIN}, {$OLD_DOMAIN} {
+	# 308 keeps the method and body, so a POST from an old client stays a POST
+	redir https://{$DOMAIN}{uri} 308
+}

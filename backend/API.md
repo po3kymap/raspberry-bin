@@ -1,6 +1,6 @@
 # Raspberry Bin API
 
-Base URL: `https://raspberry-bin-27.swedencentral.cloudapp.azure.com`
+Base URL: `https://raspberrybin.app`
 (the web app is served from the same domain, so it can use relative URLs like
 `/api/auth/login`; in development use a Vite proxy to `http://localhost:8080`).
 
