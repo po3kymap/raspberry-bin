@@ -89,6 +89,7 @@ func main() {
 	scanRequestHandler := handlers.NewScanRequestHandler(dispatcher, binService)
 	deviceHandler := handlers.NewDeviceHandler(dispatcher, binService)
 	meHandler := handlers.NewMeHandler(scanRepo, userRepo, location)
+	adminHandler := handlers.NewAdminHandler(authService, userRepo, scanRepo, binService, location)
 
 	r := gin.Default()
 	r.MaxMultipartMemory = maxScanBodySize
@@ -141,6 +142,12 @@ func main() {
 		admin.GET("/me", authHandler.Me)
 		admin.POST("/logout", authHandler.Logout)
 		admin.POST("/lids/:compartment/:action", jsonBody, deviceHandler.Lid)
+
+		admin.GET("/users", userLimiter.MiddlewareByKey(perUser), adminHandler.ListUsers)
+		admin.POST("/users", userLimiter.MiddlewareByKey(perUser), jsonBody, adminHandler.CreateUser)
+		admin.DELETE("/users/:username", userLimiter.MiddlewareByKey(perUser), adminHandler.DeleteUser)
+		admin.GET("/stats", userLimiter.MiddlewareByKey(perUser), adminHandler.Stats)
+		admin.POST("/bins/connect", scanStartLimiter.MiddlewareByKey(perUser), jsonBody, adminHandler.ConnectBin)
 	}
 
 	// The bin (Raspberry Pi), authenticated with the device API key

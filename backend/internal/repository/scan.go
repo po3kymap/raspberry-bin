@@ -98,6 +98,71 @@ func (r *ScanRepository) UserScansBetween(ctx context.Context, username string, 
 	return readScans(query.Documents(ctx))
 }
 
+// ScansBetween returns the scans in [from, to) for the admin statistics; with
+// a binID only the scans of that bin. The image URL is not read.
+func (r *ScanRepository) ScansBetween(ctx context.Context, binID string, from, to time.Time) ([]stats.UserScan, error) {
+	iter := r.DB.Collection(scansCollection).
+		Select("category", "confidence", "can_sort", "reason", "bin_id", "scanned_at", "username").
+		Where("scanned_at", ">=", from).
+		Where("scanned_at", "<", to).
+		Documents(ctx)
+	defer iter.Stop()
+
+	scans := []stats.UserScan{}
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			return scans, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var scan StoredScan
+		if err := doc.DataTo(&scan); err != nil {
+			return nil, err
+		}
+		// Filtered here instead of in the query: bin_id together with the
+		// scanned_at range would need a composite index in Firestore
+		if binID != "" && scan.BinID != binID {
+			continue
+		}
+		scans = append(scans, stats.UserScan{Scan: scan.ScanResult, Username: scan.Username})
+	}
+}
+
+// ScanCounts is how many scans a user made and how many of them were sorted.
+type ScanCounts struct {
+	Total  int
+	Sorted int
+}
+
+// CountScansByUser counts every user's scans over all time, for the admin user list.
+func (r *ScanRepository) CountScansByUser(ctx context.Context) (map[string]ScanCounts, error) {
+	iter := r.DB.Collection(scansCollection).Select("username", "can_sort").Documents(ctx)
+	defer iter.Stop()
+
+	counts := map[string]ScanCounts{}
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			return counts, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var scan StoredScan
+		if err := doc.DataTo(&scan); err != nil {
+			return nil, err
+		}
+		c := counts[scan.Username]
+		c.Total++
+		if scan.CanSort {
+			c.Sorted++
+		}
+		counts[scan.Username] = c
+	}
+}
+
 func readScans(iter *firestore.DocumentIterator) ([]models.ScanResult, error) {
 	defer iter.Stop()
 

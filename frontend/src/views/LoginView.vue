@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { login } from '../api.js'
+import { isAllowed, startPage } from '../roles.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,10 +17,11 @@ async function submit() {
   loading.value = true
   try {
     await login(username.value, password.value)
+    // The role from the login decides which app opens; a saved redirect is kept only if it belongs to that app
     const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
-      ? route.query.redirect
-      : '/'
-    router.replace(redirect)
+      ? router.resolve(route.query.redirect)
+      : null
+    router.replace(redirect && isAllowed(redirect) ? redirect : startPage())
   } catch (e) {
     error.value = e.message
   } finally {

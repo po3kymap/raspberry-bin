@@ -36,8 +36,7 @@ function checkPasswordStrength(password) {
   }
 }
 
-export async function register(username, password) {
-  await sleep(300)
+async function createAccount(username, password, role) {
   const name = username.trim().toLowerCase()
   if (!USERNAME_PATTERN.test(name)) {
     throw new Error("username must be 3-32 characters: a-z, 0-9, '.', '_' or '-'")
@@ -46,10 +45,26 @@ export async function register(username, password) {
 
   const users = loadUsers()
   if (users[name]) throw new Error('username is already taken')
-  users[name] = { passwordHash: await hash(password), failedAttempts: 0, lockedUntil: 0 }
+  users[name] = {
+    passwordHash: await hash(password),
+    role,
+    createdAt: new Date().toISOString(),
+    failedAttempts: 0,
+    lockedUntil: 0,
+  }
   saveUsers(users)
   seedHistory(name)
-  return { username: name }
+  return name
+}
+
+// In mock mode an account registered as "admin" is an admin, so the admin
+// screens can be tried without the backend
+const roleOf = (name, user) => user.role ?? (name === 'admin' ? 'admin' : 'user')
+
+export async function register(username, password) {
+  await sleep(300)
+  const role = username.trim().toLowerCase() === 'admin' ? 'admin' : 'user'
+  return { username: await createAccount(username, password, role) }
 }
 
 export async function login(username, password) {
@@ -74,8 +89,9 @@ export async function login(username, password) {
 
   user.failedAttempts = 0
   user.lockedUntil = 0
+  user.lastLoginAt = new Date().toISOString()
   saveUsers(users)
-  return { token: crypto.randomUUID(), expires_at: new Date(Date.now() + SESSION_MS).toISOString(), role: 'user' }
+  return { token: crypto.randomUUID(), expires_at: new Date(Date.now() + SESSION_MS).toISOString(), role: roleOf(name, user) }
 }
 
 export async function logout() {
@@ -139,7 +155,7 @@ function seedHistory(username) {
       at.setDate(at.getDate() - daysAgo)
       at.setHours(9 + i * 3, Math.floor(Math.random() * 60), 0, 0)
       if (at > now) continue
-      scans.push({ ...(i === 0 ? acceptedResult() : randomResult()), scanned_at: at.toISOString() })
+      scans.push({ ...(i === 0 ? acceptedResult() : randomResult()), bin_id: TEST_BIN_QR.binId, scanned_at: at.toISOString() })
     }
   }
   scans.sort((a, b) => b.scanned_at.localeCompare(a.scanned_at))
@@ -159,7 +175,7 @@ export async function startScan(binId, code, username) {
     throw new Error('invalid bin code')
   }
   const requestId = crypto.randomUUID()
-  requests.set(requestId, { createdAt: Date.now(), result: randomResult(), username })
+  requests.set(requestId, { createdAt: Date.now(), result: { ...randomResult(), bin_id: binId }, username })
   return { request_id: requestId }
 }
 
@@ -192,22 +208,24 @@ export async function getMyScans(username, limit, before) {
     .slice(0, limit)
 }
 
-export async function getMyStats(username, from, to) {
-  await sleep(200)
-  const today = new Date()
-  const toKey = to ?? dayKey(today)
+function defaultRange(from, to) {
+  const toKey = to ?? dayKey(new Date())
   const fromKey = from ?? (() => {
     const start = new Date(`${toKey}T12:00:00`)
     start.setDate(start.getDate() - 29)
     return dayKey(start)
   })()
+  return { fromKey, toKey }
+}
 
-  const all = userScans(username)
-  const scans = all.filter((scan) => {
+function inRange(scans, fromKey, toKey) {
+  return scans.filter((scan) => {
     const day = dayKey(scan.scanned_at)
     return day >= fromKey && day <= toKey
   })
+}
 
+function summarize(scans) {
   const byCategory = {}
   const perDay = new Map()
   for (const scan of scans) {
@@ -221,17 +239,21 @@ export async function getMyStats(username, from, to) {
   const sorted = scans.filter((scan) => scan.can_sort).length
 
   return {
-    summary: {
-      total: scans.length,
-      sorted,
-      rejected: scans.length - sorted,
-      by_category: byCategory,
-      per_day: [...perDay]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, { count, sorted }]) => ({ date, count, sorted })),
-    },
-    streak: streakOf(all),
+    total: scans.length,
+    sorted,
+    rejected: scans.length - sorted,
+    by_category: byCategory,
+    per_day: [...perDay]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, { count, sorted }]) => ({ date, count, sorted })),
   }
+}
+
+export async function getMyStats(username, from, to) {
+  await sleep(200)
+  const { fromKey, toKey } = defaultRange(from, to)
+  const all = userScans(username)
+  return { summary: summarize(inRange(all, fromKey, toKey)), streak: streakOf(all) }
 }
 
 function streakOf(scans) {
@@ -250,4 +272,119 @@ function streakOf(scans) {
   const alive = lastSortedDate === today || lastSortedDate === dayKey(yesterday)
 
   return { current: alive ? run : 0, longest, last_sorted_date: lastSortedDate }
+}
+
+// Admin. Mirrors /api/admin/users and /api/admin/stats; the current admin is
+// passed in because the mock has no server-side session.
+
+export async function listUsers() {
+  await sleep(200)
+  const users = loadUsers()
+  return Object.keys(users)
+    .sort()
+    .map((name) => {
+      const scans = userScans(name)
+      const streak = streakOf(scans)
+      return {
+        username: name,
+        role: roleOf(name, users[name]),
+        created_at: users[name].createdAt ?? null,
+        last_login_at: users[name].lastLoginAt ?? null,
+        locked: Date.now() < users[name].lockedUntil,
+        current_streak: streak.current,
+        longest_streak: streak.longest,
+        last_sorted_date: streak.last_sorted_date,
+        total_scans: scans.length,
+        sorted_scans: scans.filter((scan) => scan.can_sort).length,
+      }
+    })
+}
+
+export async function createUser(username, password, role) {
+  await sleep(300)
+  if (role !== 'user' && role !== 'admin') throw new Error('role must be user or admin')
+  return { username: await createAccount(username, password, role), role }
+}
+
+export async function deleteUser(username, currentUsername) {
+  await sleep(300)
+  const users = loadUsers()
+  if (username === currentUsername) throw new Error('you cannot delete your own account')
+  if (!users[username]) throw new Error('user not found')
+  const admins = Object.keys(users).filter((name) => roleOf(name, users[name]) === 'admin')
+  if (roleOf(username, users[username]) === 'admin' && admins.length < 2) {
+    throw new Error('the last admin cannot be deleted')
+  }
+
+  delete users[username]
+  saveUsers(users)
+  const history = loadHistory()
+  delete history[username]
+  saveHistory(history)
+}
+
+export async function connectBin(binId, code) {
+  await sleep(300)
+  if (binId !== TEST_BIN_QR.binId || code !== TEST_BIN_QR.code) throw new Error('invalid bin code')
+  return { bin_id: binId }
+}
+
+export async function setLid(binId, compartment, action) {
+  await sleep(300)
+  if (binId !== TEST_BIN_QR.binId) throw new Error('bin not found')
+  return { status: 'queued' }
+}
+
+// Scans saved before bin_id was added to the mock belong to the test bin
+const binOf = (scan) => scan.bin_id ?? TEST_BIN_QR.binId
+
+export async function getAdminStats(from, to, binId) {
+  await sleep(200)
+  const { fromKey, toKey } = defaultRange(from, to)
+  const users = loadUsers()
+  const names = Object.keys(users)
+
+  const scans = []
+  const perUser = []
+  for (const name of names) {
+    const own = inRange(userScans(name), fromKey, toKey).filter((scan) => !binId || binOf(scan) === binId)
+    scans.push(...own)
+    if (own.length) {
+      perUser.push({ username: name, total: own.length, sorted: own.filter((scan) => scan.can_sort).length })
+    }
+  }
+
+  const byReason = {}
+  const byBin = {}
+  let confidenceSum = 0
+  for (const scan of scans) {
+    byBin[binOf(scan)] = (byBin[binOf(scan)] ?? 0) + 1
+    if (scan.can_sort) {
+      confidenceSum += scan.confidence
+    } else {
+      const reason = scan.reason || 'unknown'
+      byReason[reason] = (byReason[reason] ?? 0) + 1
+    }
+  }
+
+  const summary = summarize(scans)
+  perUser.sort((a, b) => b.sorted - a.sorted || b.total - a.total || a.username.localeCompare(b.username))
+  return {
+    summary: {
+      ...summary,
+      by_reason: byReason,
+      by_bin: byBin,
+      average_confidence: summary.sorted ? confidenceSum / summary.sorted : 0,
+      active_users: perUser.length,
+      top_users: perUser.slice(0, 5),
+    },
+    users: {
+      total: names.length,
+      admins: names.filter((name) => roleOf(name, users[name]) === 'admin').length,
+      new: names.filter((name) => {
+        const created = users[name].createdAt
+        return created && dayKey(created) >= fromKey && dayKey(created) <= toKey
+      }).length,
+    },
+  }
 }

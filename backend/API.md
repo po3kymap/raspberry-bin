@@ -112,6 +112,62 @@ Body `{"bin_id": "bin-27"}` → `202 {"status": "queued"}`.
 The Pi receives the command within a second; if it does not pick it up within
 10 s the command is dropped.
 
+### `GET /api/admin/users`
+All users sorted by username (password hashes are never sent):
+```json
+[{"username": "alice", "role": "user", "created_at": "2026-10-20T09:12:00Z",
+  "last_login_at": "2026-10-29T13:05:00Z", "locked": false,
+  "current_streak": 3, "longest_streak": 7, "last_sorted_date": "2026-10-28",
+  "total_scans": 25, "sorted_scans": 22}]
+```
+- `locked`: the account is in the 5-minute lock after wrong passwords
+- `last_login_at`: last successful login, `null` if the user has not logged
+  in since this was added
+- `total_scans` / `sorted_scans`: all scans of the user over all time and the
+  accepted ones (the web app shows sorted / total as the user's accuracy)
+
+### `POST /api/admin/users`
+`{"username": "bob", "password": "…", "role": "user"}` → `201 {"username": "bob", "role": "user"}`
+
+- `role` is `user` (default) or `admin`; same username and password rules as register
+- `400` invalid username, password or role, `409` username taken
+
+### `DELETE /api/admin/users/{username}` → `204`
+Deletes the account and logs the user out everywhere at once. Their scans stay
+in the overall statistics.
+
+- `400` you tried to delete your own account, `404` unknown user,
+  `409` the last admin cannot be deleted
+
+### `POST /api/admin/bins/connect`
+The admin scans the QR on a bin (`rbin:<bin_id>:<code>`) to connect to it:
+`{"bin_id": "bin-27", "code": "…"}` → `200 {"bin_id": "bin-27"}`.
+`403` wrong code, `429` too many attempts. The web app's Bins tab then shows
+a short summary and the lid controls of that bin; the overview shows all bins.
+
+### `GET /api/admin/stats?bin_id=bin-27&from=2026-10-01&to=2026-10-28`
+Statistics of one bin (or of all bins without `bin_id`); same dates as
+`/api/me/stats`. `users` is always about all accounts.
+```json
+{
+  "summary": {
+    "total": 120, "sorted": 104, "rejected": 16,
+    "by_category": {"PMD": 40, "ORGANIC": 25, "PAPER": 22, "GENERAL_WASTE": 17},
+    "per_day": [{"date": "2026-10-27", "count": 30, "sorted": 26}],
+    "by_reason": {"unsupported_item": 9, "low_confidence": 6, "classifier_unavailable": 1},
+    "by_bin": {"bin-27": 120},
+    "average_confidence": 0.93,
+    "active_users": 14,
+    "top_users": [{"username": "alice", "total": 21, "sorted": 20}]
+  },
+  "users": {"total": 25, "admins": 2, "new": 3}
+}
+```
+`by_reason` counts the rejected scans by reason, `average_confidence` is over
+the sorted items only, `active_users` are users with a scan in the period and
+`top_users` the 5 with the most sorted items; `users.new` counts the accounts
+created in the period.
+
 `POST /api/admin/login`, `GET /api/admin/me` and `POST /api/admin/logout` also
 exist; `/api/admin/login` only accepts admin accounts.
 

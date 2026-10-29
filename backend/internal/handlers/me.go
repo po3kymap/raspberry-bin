@@ -71,7 +71,7 @@ func (h *MeHandler) Scans(c *gin.Context) {
 func (h *MeHandler) Stats(c *gin.Context) {
 	today := time.Now().In(h.Location).Format(stats.DateLayout)
 
-	from, to, ok := h.parseRange(c, today)
+	from, to, ok := parseRange(c, h.Location, today)
 	if !ok {
 		return
 	}
@@ -101,11 +101,12 @@ func (h *MeHandler) Stats(c *gin.Context) {
 	})
 }
 
-// parseRange turns ?from and ?to (dates) into [start of from, start of the day after to).
-func (h *MeHandler) parseRange(c *gin.Context, today string) (time.Time, time.Time, bool) {
+// parseRange turns ?from and ?to (dates in loc) into [start of from, start of the day after to).
+// Used by the user and the admin statistics.
+func parseRange(c *gin.Context, loc *time.Location, today string) (time.Time, time.Time, bool) {
 	parse := func(name, fallback string) (time.Time, bool) {
 		value := c.DefaultQuery(name, fallback)
-		t, err := time.ParseInLocation(stats.DateLayout, value, h.Location)
+		t, err := time.ParseInLocation(stats.DateLayout, value, loc)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid " + name + ", use YYYY-MM-DD"})
 			return time.Time{}, false

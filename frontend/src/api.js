@@ -1,4 +1,5 @@
 import { clearSession, saveSession, session } from './auth.js'
+import { disconnectBin } from './bin.js'
 import * as mock from './mock.js'
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
@@ -46,6 +47,7 @@ export async function logout() {
     else await request('/api/auth/logout', { method: 'POST' })
   } finally {
     clearSession()
+    disconnectBin()
   }
 }
 
@@ -112,4 +114,41 @@ export async function getMyStreak() {
   })
 
   return { current: streak.current, best: streak.longest, last_day: streak.last_sorted_date || null, week }
+}
+
+// Admin
+
+export function getUsers() {
+  if (USE_MOCKS) return mock.listUsers()
+  return request('/api/admin/users')
+}
+
+export function createUser({ username, password, role }) {
+  if (USE_MOCKS) return mock.createUser(username, password, role)
+  return request('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, role }) })
+}
+
+export function deleteUser(username) {
+  if (USE_MOCKS) return mock.deleteUser(username, session.value?.username)
+  return request(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+}
+
+export function getAdminStats({ from, to, binId } = {}) {
+  if (USE_MOCKS) return mock.getAdminStats(from, to, binId)
+  const params = new URLSearchParams()
+  if (binId) params.set('bin_id', binId)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return request(`/api/admin/stats${params.size ? `?${params}` : ''}`)
+}
+
+export function connectBin(binId, code) {
+  if (USE_MOCKS) return mock.connectBin(binId, code)
+  return request('/api/admin/bins/connect', { method: 'POST', body: JSON.stringify({ bin_id: binId, code }) })
+}
+
+// action is "open" or "close"; the bin receives the command within a second
+export function setLid(binId, compartment, action) {
+  if (USE_MOCKS) return mock.setLid(binId, compartment, action)
+  return request(`/api/admin/lids/${compartment}/${action}`, { method: 'POST', body: JSON.stringify({ bin_id: binId }) })
 }

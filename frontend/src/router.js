@@ -1,6 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { isAdmin, isLoggedIn } from './auth.js'
-import AdminView from './views/AdminView.vue'
+import { isLoggedIn } from './auth.js'
+import { isAllowed, startPage } from './roles.js'
+import AdminActiveView from './views/admin/AdminActiveView.vue'
+import AdminBinsView from './views/admin/AdminBinsView.vue'
+import AdminOverviewView from './views/admin/AdminOverviewView.vue'
+import AdminRejectedView from './views/admin/AdminRejectedView.vue'
+import AdminSettingsView from './views/admin/AdminSettingsView.vue'
+import AdminSortingView from './views/admin/AdminSortingView.vue'
+import AdminUsersView from './views/admin/AdminUsersView.vue'
 import HistoryView from './views/HistoryView.vue'
 import HomeView from './views/HomeView.vue'
 import LoginView from './views/LoginView.vue'
@@ -15,7 +22,21 @@ const router = createRouter({
     { path: '/stats', name: 'stats', component: StatsView },
     { path: '/history', name: 'history', component: HistoryView },
     { path: '/settings', name: 'settings', component: SettingsView },
-    { path: '/admin', name: 'admin', component: AdminView, meta: { admin: true } },
+    {
+      path: '/admin',
+      // Child routes inherit this meta, so every admin page is checked by the guard
+      meta: { admin: true },
+      redirect: { name: 'admin-overview' },
+      children: [
+        { path: 'overview', name: 'admin-overview', component: AdminOverviewView },
+        { path: 'overview/sorting', name: 'admin-sorting', component: AdminSortingView },
+        { path: 'overview/rejected', name: 'admin-rejected', component: AdminRejectedView },
+        { path: 'overview/active', name: 'admin-active', component: AdminActiveView },
+        { path: 'bins', name: 'admin-bins', component: AdminBinsView },
+        { path: 'users', name: 'admin-users', component: AdminUsersView },
+        { path: 'settings', name: 'admin-settings', component: AdminSettingsView },
+      ],
+    },
     { path: '/login', name: 'login', component: LoginView, meta: { guest: true } },
     { path: '/register', name: 'register', component: RegisterView, meta: { guest: true } },
   ],
@@ -23,13 +44,13 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.guest) {
-    return isLoggedIn() ? { name: 'home' } : true
+    return isLoggedIn() ? startPage() : true
   }
-  if (!to.meta.public && !isLoggedIn()) {
+  if (!isLoggedIn()) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.meta.admin && !isAdmin()) {
-    return { name: 'home' }
+  if (!isAllowed(to)) {
+    return startPage()
   }
   return true
 })

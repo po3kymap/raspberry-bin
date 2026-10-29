@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ var (
 	ErrAccountLocked      = errors.New("too many failed attempts, try again later")
 	ErrInvalidSession     = errors.New("invalid or expired session")
 	ErrInvalidUsername    = errors.New("username must be 3-32 characters: a-z, 0-9, '.', '_' or '-'")
+	ErrInvalidRole        = errors.New("role must be user or admin")
 
 	// Returned by the Store
 	ErrUserNotFound    = errors.New("user not found")
@@ -44,6 +46,8 @@ type Store interface {
 	CreateSession(ctx context.Context, tokenHash string, session models.Session) error
 	GetSession(ctx context.Context, tokenHash string) (*models.Session, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
+	// SetLastLogin only changes the user's last_login_at field
+	SetLastLogin(ctx context.Context, username string, at time.Time) error
 }
 
 type LoginResult struct {
@@ -84,6 +88,14 @@ func (s *Service) Register(ctx context.Context, username, password string) (stri
 func (s *Service) CreateAdmin(ctx context.Context, username, password string) error {
 	_, err := s.createUser(ctx, username, password, models.RoleAdmin)
 	return err
+}
+
+// CreateUser is used by admins in the web app to add an account with either role.
+func (s *Service) CreateUser(ctx context.Context, username, password, role string) (string, error) {
+	if role != models.RoleUser && role != models.RoleAdmin {
+		return "", ErrInvalidRole
+	}
+	return s.createUser(ctx, username, password, role)
 }
 
 func (s *Service) createUser(ctx context.Context, username, password, role string) (string, error) {
@@ -163,6 +175,10 @@ func (s *Service) Login(ctx context.Context, username, password string) (*LoginR
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Only for the admin user list, so a failed write must not fail the login
+	if err := s.store.SetLastLogin(ctx, username, now); err != nil {
+		log.Printf("[WARN] could not save last login for %q: %v", username, err)
 	}
 	return &LoginResult{Token: token, ExpiresAt: expiresAt, Role: user.Role}, nil
 }
