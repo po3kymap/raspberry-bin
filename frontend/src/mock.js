@@ -23,6 +23,25 @@ function saveUsers(users) {
   } catch {}
 }
 
+// Activity log, like the "activity" collection on the server
+const ACTIVITY_KEY = 'raspberrybin_mock_activity'
+
+function loadActivity() {
+  try {
+    return JSON.parse(localStorage.getItem(ACTIVITY_KEY)) || []
+  } catch {
+    return []
+  }
+}
+
+function record(event) {
+  const id = crypto.randomUUID().replaceAll('-', '').slice(0, 20)
+  const events = [{ can_sort: false, ...event, id, at: new Date().toISOString() }, ...loadActivity()]
+  try {
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(events.slice(0, 500)))
+  } catch {}
+}
+
 async function hash(text) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
   return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
@@ -64,7 +83,9 @@ const roleOf = (name, user) => user.role ?? (name === 'admin' ? 'admin' : 'user'
 export async function register(username, password) {
   await sleep(300)
   const role = username.trim().toLowerCase() === 'admin' ? 'admin' : 'user'
-  return { username: await createAccount(username, password, role) }
+  const name = await createAccount(username, password, role)
+  record({ type: 'register', username: name })
+  return { username: name }
 }
 
 export async function login(username, password) {
@@ -72,8 +93,12 @@ export async function login(username, password) {
   const name = username.trim().toLowerCase()
   const users = loadUsers()
   const user = users[name]
-  if (!user) throw new Error('invalid username or password')
-  if (Date.now() < user.lockedUntil) throw new Error('too many failed attempts, try again later')
+  const fail = (reason, message) => {
+    record({ type: 'login_failed', username: name, reason })
+    throw new Error(message)
+  }
+  if (!user) fail('wrong_password', 'invalid username or password')
+  if (Date.now() < user.lockedUntil) fail('locked', 'too many failed attempts, try again later')
 
   if (user.passwordHash !== (await hash(password))) {
     user.failedAttempts += 1
@@ -81,21 +106,23 @@ export async function login(username, password) {
       user.failedAttempts = 0
       user.lockedUntil = Date.now() + LOCK_MS
       saveUsers(users)
-      throw new Error('too many failed attempts, try again later')
+      fail('locked', 'too many failed attempts, try again later')
     }
     saveUsers(users)
-    throw new Error('invalid username or password')
+    fail('wrong_password', 'invalid username or password')
   }
 
   user.failedAttempts = 0
   user.lockedUntil = 0
   user.lastLoginAt = new Date().toISOString()
   saveUsers(users)
+  record({ type: 'login', username: name, role: roleOf(name, user) })
   return { token: crypto.randomUUID(), expires_at: new Date(Date.now() + SESSION_MS).toISOString(), role: roleOf(name, user) }
 }
 
-export async function logout() {
+export async function logout(username, role) {
   await sleep(100)
+  record({ type: 'logout', username, role })
 }
 
 const HISTORY_KEY = 'raspberrybin_mock_history'
@@ -196,6 +223,17 @@ export async function getScanRequest(requestId, wait = 25) {
   const result = { ...entry.result, scanned_at: new Date().toISOString() }
   if (!entry.saved) {
     addScan(entry.username, result)
+    record({
+      type: 'scan',
+      username: entry.username,
+      bin_id: result.bin_id,
+      scan_id: crypto.randomUUID().replaceAll('-', '').slice(0, 20),
+      image_id: `scans/${crypto.randomUUID()}.jpg`,
+      category: result.category,
+      confidence: result.confidence,
+      can_sort: result.can_sort,
+      reason: result.reason,
+    })
     entry.saved = true
   }
   return { status: 'done', result }
@@ -300,10 +338,12 @@ export async function listUsers() {
     })
 }
 
-export async function createUser(username, password, role) {
+export async function createUser(username, password, role, admin) {
   await sleep(300)
   if (role !== 'user' && role !== 'admin') throw new Error('role must be user or admin')
-  return { username: await createAccount(username, password, role), role }
+  const name = await createAccount(username, password, role)
+  record({ type: 'user_created', username: admin, target: name, role })
+  return { username: name, role }
 }
 
 export async function deleteUser(username, currentUsername) {
@@ -321,18 +361,28 @@ export async function deleteUser(username, currentUsername) {
   const history = loadHistory()
   delete history[username]
   saveHistory(history)
+  record({ type: 'user_deleted', username: currentUsername, target: username })
 }
 
-export async function connectBin(binId, code) {
+export async function connectBin(binId, code, admin) {
   await sleep(300)
   if (binId !== TEST_BIN_QR.binId || code !== TEST_BIN_QR.code) throw new Error('invalid bin code')
+  record({ type: 'bin_connect', username: admin, bin_id: binId })
   return { bin_id: binId }
 }
 
-export async function setLid(binId, compartment, action) {
+export async function setLid(binId, compartment, action, admin) {
   await sleep(300)
   if (binId !== TEST_BIN_QR.binId) throw new Error('bin not found')
+  record({ type: 'lid', username: admin, bin_id: binId, compartment, action })
   return { status: 'queued' }
+}
+
+export async function getActivity(limit, before) {
+  await sleep(200)
+  return loadActivity()
+    .filter((event) => !before || event.at < before)
+    .slice(0, limit)
 }
 
 // Scans saved before bin_id was added to the mock belong to the test bin

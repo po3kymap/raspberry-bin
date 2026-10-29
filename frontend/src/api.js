@@ -43,7 +43,7 @@ export async function login(username, password) {
 
 export async function logout() {
   try {
-    if (USE_MOCKS) await mock.logout()
+    if (USE_MOCKS) await mock.logout(session.value?.username, session.value?.role)
     else await request('/api/auth/logout', { method: 'POST' })
   } finally {
     clearSession()
@@ -124,7 +124,7 @@ export function getUsers() {
 }
 
 export function createUser({ username, password, role }) {
-  if (USE_MOCKS) return mock.createUser(username, password, role)
+  if (USE_MOCKS) return mock.createUser(username, password, role, session.value?.username)
   return request('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, role }) })
 }
 
@@ -143,12 +143,32 @@ export function getAdminStats({ from, to, binId } = {}) {
 }
 
 export function connectBin(binId, code) {
-  if (USE_MOCKS) return mock.connectBin(binId, code)
+  if (USE_MOCKS) return mock.connectBin(binId, code, session.value?.username)
   return request('/api/admin/bins/connect', { method: 'POST', body: JSON.stringify({ bin_id: binId, code }) })
 }
 
 // action is "open" or "close"; the bin receives the command within a second
 export function setLid(binId, compartment, action) {
-  if (USE_MOCKS) return mock.setLid(binId, compartment, action)
+  if (USE_MOCKS) return mock.setLid(binId, compartment, action, session.value?.username)
   return request(`/api/admin/lids/${compartment}/${action}`, { method: 'POST', body: JSON.stringify({ bin_id: binId }) })
+}
+
+export function getActivity({ limit = 20, before } = {}) {
+  if (USE_MOCKS) return mock.getActivity(limit, before)
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before) params.set('before', before)
+  return request(`/api/admin/activity?${params}`)
+}
+
+// Photo of a scan as a blob: URL for <img>, or null when there is none.
+// Fetched with the session token because <img src> cannot send it.
+export async function getScanImageUrl(imageId) {
+  if (USE_MOCKS) return null
+  const file = imageId.replace(/^scans\//, '')
+  const response = await fetch(`/api/admin/images/${encodeURIComponent(file)}`, {
+    headers: { Authorization: `Bearer ${session.value?.token}` },
+  })
+  if (response.status === 401) clearSession()
+  if (!response.ok) return null
+  return URL.createObjectURL(await response.blob())
 }

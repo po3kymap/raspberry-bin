@@ -9,6 +9,7 @@ import (
 	_ "time/tzdata" // time zone data built in, so Europe/Amsterdam works in any container
 
 	"raspberry-bin-api/config"
+	"raspberry-bin-api/internal/activity"
 	"raspberry-bin-api/internal/auth"
 	"raspberry-bin-api/internal/bins"
 	"raspberry-bin-api/internal/clients"
@@ -82,14 +83,16 @@ func main() {
 	authService := auth.NewService(userRepo)
 	binService := bins.NewService(repository.NewBinRepository(firebaseApp.DB))
 	dispatcher := dispatch.New(dispatch.DefaultConfig())
+	activityRepo := repository.NewActivityRepository(firebaseApp.DB)
+	recorder := activity.NewRecorder(activityRepo)
 
-	scanHandler := handlers.NewScanHandler(scanRepo, clients.NewAIClient(aiServiceURL),
-		storage.NewFileStorage(firebaseApp.Storage, bucketName), dispatcher)
-	authHandler := handlers.NewAuthHandler(authService)
+	fileStorage := storage.NewFileStorage(firebaseApp.Storage, bucketName)
+	scanHandler := handlers.NewScanHandler(scanRepo, clients.NewAIClient(aiServiceURL), fileStorage, dispatcher, recorder)
+	authHandler := handlers.NewAuthHandler(authService, recorder)
 	scanRequestHandler := handlers.NewScanRequestHandler(dispatcher, binService)
-	deviceHandler := handlers.NewDeviceHandler(dispatcher, binService)
+	deviceHandler := handlers.NewDeviceHandler(dispatcher, binService, recorder)
 	meHandler := handlers.NewMeHandler(scanRepo, userRepo, location)
-	adminHandler := handlers.NewAdminHandler(authService, userRepo, scanRepo, binService, location)
+	adminHandler := handlers.NewAdminHandler(authService, userRepo, scanRepo, binService, recorder, activityRepo, fileStorage, location)
 
 	r := gin.Default()
 	r.MaxMultipartMemory = maxScanBodySize
@@ -147,6 +150,8 @@ func main() {
 		admin.POST("/users", userLimiter.MiddlewareByKey(perUser), jsonBody, adminHandler.CreateUser)
 		admin.DELETE("/users/:username", userLimiter.MiddlewareByKey(perUser), adminHandler.DeleteUser)
 		admin.GET("/stats", userLimiter.MiddlewareByKey(perUser), adminHandler.Stats)
+		admin.GET("/activity", userLimiter.MiddlewareByKey(perUser), adminHandler.ListActivity)
+		admin.GET("/images/:file", userLimiter.MiddlewareByKey(perUser), adminHandler.ScanImage)
 		admin.POST("/bins/connect", scanStartLimiter.MiddlewareByKey(perUser), jsonBody, adminHandler.ConnectBin)
 	}
 

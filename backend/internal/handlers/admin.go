@@ -4,15 +4,18 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"raspberry-bin-api/internal/activity"
 	"raspberry-bin-api/internal/auth"
 	"raspberry-bin-api/internal/bins"
 	"raspberry-bin-api/internal/middleware"
 	"raspberry-bin-api/internal/models"
 	"raspberry-bin-api/internal/repository"
 	"raspberry-bin-api/internal/stats"
+	"raspberry-bin-api/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,11 +27,14 @@ type AdminHandler struct {
 	Users    *repository.UserRepository
 	ScanRepo *repository.ScanRepository
 	Bins     *bins.Service
+	Activity *activity.Recorder
+	Events   *repository.ActivityRepository
+	Storage  *storage.FileStorage
 	Location *time.Location
 }
 
-func NewAdminHandler(authService *auth.Service, users *repository.UserRepository, scans *repository.ScanRepository, binService *bins.Service, loc *time.Location) *AdminHandler {
-	return &AdminHandler{Auth: authService, Users: users, ScanRepo: scans, Bins: binService, Location: loc}
+func NewAdminHandler(authService *auth.Service, users *repository.UserRepository, scans *repository.ScanRepository, binService *bins.Service, recorder *activity.Recorder, events *repository.ActivityRepository, fileStorage *storage.FileStorage, loc *time.Location) *AdminHandler {
+	return &AdminHandler{Auth: authService, Users: users, ScanRepo: scans, Bins: binService, Activity: recorder, Events: events, Storage: fileStorage, Location: loc}
 }
 
 // userInfo is what admins see about a user; it never contains the password hash.
@@ -120,6 +126,9 @@ func (h *AdminHandler) CreateUser(c *gin.Context) {
 
 	log.Printf("[AUDIT] admin %q created %s %q from %s",
 		c.GetString(middleware.UsernameKey), role, username, c.ClientIP())
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.UserCreated, Username: c.GetString(middleware.UsernameKey), Target: username, Role: role, IP: c.ClientIP(),
+	})
 	c.JSON(http.StatusCreated, gin.H{"username": username, "role": role})
 }
 
@@ -149,6 +158,9 @@ func (h *AdminHandler) DeleteUser(c *gin.Context) {
 	}
 
 	log.Printf("[AUDIT] admin %q deleted user %q from %s", admin, username, c.ClientIP())
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.UserDeleted, Username: admin, Target: username, IP: c.ClientIP(),
+	})
 	c.Status(http.StatusNoContent)
 }
 
@@ -179,6 +191,9 @@ func (h *AdminHandler) ConnectBin(c *gin.Context) {
 	}
 
 	log.Printf("[AUDIT] admin %q connected to bin %q from %s", c.GetString(middleware.UsernameKey), req.BinID, c.ClientIP())
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.BinConnect, Username: c.GetString(middleware.UsernameKey), BinID: req.BinID, IP: c.ClientIP(),
+	})
 	c.JSON(http.StatusOK, gin.H{"bin_id": req.BinID})
 }
 
@@ -217,4 +232,59 @@ func (h *AdminHandler) Stats(c *gin.Context) {
 		"summary": stats.SummarizeOverview(scans, h.Location),
 		"users":   users,
 	})
+}
+
+// ListActivity: GET /api/admin/activity?limit=20&before=<RFC 3339 time>, newest first.
+// To load the next page, pass the "at" of the last event as before.
+func (h *AdminHandler) ListActivity(c *gin.Context) {
+	limit := defaultScanPageSize
+	if value := c.Query("limit"); value != "" {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			return
+		}
+		limit = min(n, maxScanPageSize)
+	}
+
+	var before time.Time
+	if value := c.Query("before"); value != "" {
+		t, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid before, use RFC 3339"})
+			return
+		}
+		before = t
+	}
+
+	events, err := h.Events.ListEvents(c.Request.Context(), limit, before)
+	if err != nil {
+		log.Printf("[ERROR] listing activity failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, events)
+}
+
+// ScanImage: GET /api/admin/images/{file}, e.g. /api/admin/images/5f1c….jpg for
+// the image_id "scans/5f1c….jpg" from the activity log. Admins only; the
+// photo is streamed through the backend, so the bucket stays private.
+func (h *AdminHandler) ScanImage(c *gin.Context) {
+	reader, contentType, err := h.Storage.OpenImage(c.Request.Context(), "scans/"+c.Param("file"))
+	switch {
+	case errors.Is(err, storage.ErrInvalidImageName), errors.Is(err, storage.ErrImageNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "image not found"})
+		return
+	case err != nil:
+		log.Printf("[ERROR] reading scan image failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	defer reader.Close()
+
+	if contentType != "image/jpeg" && contentType != "image/png" {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Cache-Control", "private, max-age=3600")
+	c.DataFromReader(http.StatusOK, -1, contentType, reader, nil)
 }

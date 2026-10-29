@@ -16,3 +16,11 @@ export function timeAgo(iso) {
 }
 
 export const percent = (part, total) => (total ? Math.round((part / total) * 100) : 0)
+
+// ISO time -> "Today, 14:32" or "Thu 29 Oct, 14:32"
+export function formatTime(iso) {
+  const date = new Date(iso)
+  const clock = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  if (date.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE')) return `Today, ${clock}`
+  return `${date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock}`
+}

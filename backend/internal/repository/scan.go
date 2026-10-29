@@ -39,13 +39,14 @@ func NewScanRepository(db *firestore.Client, loc *time.Location) *ScanRepository
 }
 
 // SaveScan writes the scan to the global collection and to the user's
-// history, and updates the user's streak, all in one transaction.
-func (r *ScanRepository) SaveScan(ctx context.Context, scan StoredScan) error {
+// history, and updates the user's streak, all in one transaction. It returns
+// the ID of the new scan.
+func (r *ScanRepository) SaveScan(ctx context.Context, scan StoredScan) (string, error) {
 	userRef := r.DB.Collection(usersCollection).Doc(scan.Username)
 	scanRef := r.DB.Collection(scansCollection).NewDoc()
 	userScanRef := userRef.Collection(userScansCollection).Doc(scanRef.ID)
 
-	return r.DB.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+	err := r.DB.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		// Firestore transactions must read before they write
 		doc, err := tx.Get(userRef)
 		if status.Code(err) == codes.NotFound {
@@ -77,6 +78,10 @@ func (r *ScanRepository) SaveScan(ctx context.Context, scan StoredScan) error {
 			{Path: "last_sorted_date", Value: user.LastSortedDate},
 		})
 	})
+	if err != nil {
+		return "", err
+	}
+	return scanRef.ID, nil
 }
 
 // ListUserScans returns the user's scans, newest first. If before is set,

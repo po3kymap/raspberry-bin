@@ -4,7 +4,9 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
+	"raspberry-bin-api/internal/activity"
 	"raspberry-bin-api/internal/auth"
 	"raspberry-bin-api/internal/middleware"
 	"raspberry-bin-api/internal/models"
@@ -13,11 +15,12 @@ import (
 )
 
 type AuthHandler struct {
-	Auth *auth.Service
+	Auth     *auth.Service
+	Activity *activity.Recorder
 }
 
-func NewAuthHandler(authService *auth.Service) *AuthHandler {
-	return &AuthHandler{Auth: authService}
+func NewAuthHandler(authService *auth.Service, recorder *activity.Recorder) *AuthHandler {
+	return &AuthHandler{Auth: authService, Activity: recorder}
 }
 
 type credentials struct {
@@ -48,6 +51,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	log.Printf("[AUDIT] user %q registered from %s", username, c.ClientIP())
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.Register, Username: username, Role: models.RoleUser, IP: c.ClientIP(),
+	})
 	c.JSON(http.StatusCreated, gin.H{"username": username})
 }
 
@@ -69,14 +75,23 @@ func (h *AuthHandler) login(c *gin.Context, requiredRole string) {
 		return
 	}
 
+	username := strings.ToLower(strings.TrimSpace(req.Username))
+	failed := func(reason string) {
+		h.Activity.Record(c.Request.Context(), activity.Event{
+			Type: activity.LoginFailed, Username: username, Reason: reason, IP: c.ClientIP(),
+		})
+	}
+
 	result, err := h.Auth.Login(c.Request.Context(), req.Username, req.Password)
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		log.Printf("[AUDIT] failed login for %q from %s", req.Username, c.ClientIP())
+		failed("wrong_password")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	case errors.Is(err, auth.ErrAccountLocked):
 		log.Printf("[AUDIT] locked login attempt for %q from %s", req.Username, c.ClientIP())
+		failed("locked")
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 		return
 	case err != nil:
@@ -90,11 +105,15 @@ func (h *AuthHandler) login(c *gin.Context, requiredRole string) {
 		// like a wrong password, so the admin login reveals nothing extra
 		_ = h.Auth.Logout(c.Request.Context(), result.Token)
 		log.Printf("[AUDIT] non-admin %q tried the admin login from %s", req.Username, c.ClientIP())
+		failed("not_admin")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": auth.ErrInvalidCredentials.Error()})
 		return
 	}
 
 	log.Printf("[AUDIT] %s %q logged in from %s", result.Role, req.Username, c.ClientIP())
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.Login, Username: username, Role: result.Role, IP: c.ClientIP(),
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"token":      result.Token,
 		"expires_at": result.ExpiresAt,
@@ -112,6 +131,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	log.Printf("[AUDIT] %q logged out", c.GetString(middleware.UsernameKey))
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.Logout, Username: c.GetString(middleware.UsernameKey), Role: c.GetString(middleware.RoleKey),
+	})
 	c.Status(http.StatusNoContent)
 }
 

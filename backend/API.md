@@ -168,6 +168,27 @@ the sorted items only, `active_users` are users with a scan in the period and
 `top_users` the 5 with the most sorted items; `users.new` counts the accounts
 created in the period.
 
+### `GET /api/admin/activity?limit=20&before=<at>`
+The activity log, newest first; `limit` 1–50 (default 20). For the next page
+pass the `at` of the last event as `before`.
+```json
+[{"type": "scan", "at": "2026-10-29T14:03:11Z", "username": "alice", "bin_id": "bin-27",
+  "scan_id": "Xk2…", "image_id": "scans/5f1c….jpg", "category": "PMD",
+  "confidence": 0.93, "can_sort": true},
+ {"type": "login_failed", "at": "2026-10-29T13:58:02Z", "username": "admin",
+  "reason": "wrong_password", "ip": "145.126.27.204", "can_sort": false}]
+```
+
+| type | Fields |
+|---|---|
+| `login` / `logout` | `username`, `role` (`ip` for login) |
+| `login_failed` | `username` as typed, `reason` (`wrong_password`, `locked`, `not_admin`), `ip` |
+| `register` | `username` (self-registration), `ip` |
+| `user_created` / `user_deleted` | `username` = the admin, `target` = the account (`role` when created) |
+| `scan` | `username`, `bin_id`, `scan_id`, `image_id` (object in Firebase Storage), `category`, `confidence`, `can_sort`, `reason` |
+| `lid` | `username` = the admin, `bin_id`, `compartment`, `action` (`open`/`close`) |
+| `bin_connect` | `username` = the admin, `bin_id` |
+
 `POST /api/admin/login`, `GET /api/admin/me` and `POST /api/admin/logout` also
 exist; `/api/admin/login` only accepts admin accounts.
 

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import PeriodTabs from '../../components/PeriodTabs.vue'
+import RecentActivity from '../../components/RecentActivity.vue'
 import { percent } from '../../format.js'
 import { useAdminStats } from '../../useAdminStats.js'
 
@@ -77,5 +78,7 @@ const tiles = computed(() => {
         <p class="mt-1 text-xs text-gray-500">{{ tile.note }} →</p>
       </RouterLink>
     </div>
+
+    <RecentActivity />
   </section>
 </template>

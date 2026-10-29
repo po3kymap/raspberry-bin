@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { isLoggedIn } from './auth.js'
 import { isAllowed, startPage } from './roles.js'
 import AdminActiveView from './views/admin/AdminActiveView.vue'
+import AdminActivityView from './views/admin/AdminActivityView.vue'
 import AdminBinsView from './views/admin/AdminBinsView.vue'
 import AdminOverviewView from './views/admin/AdminOverviewView.vue'
 import AdminRejectedView from './views/admin/AdminRejectedView.vue'
@@ -32,6 +33,7 @@ const router = createRouter({
         { path: 'overview/sorting', name: 'admin-sorting', component: AdminSortingView },
         { path: 'overview/rejected', name: 'admin-rejected', component: AdminRejectedView },
         { path: 'overview/active', name: 'admin-active', component: AdminActiveView },
+        { path: 'overview/activity', name: 'admin-activity', component: AdminActivityView },
         { path: 'bins', name: 'admin-bins', component: AdminBinsView },
         { path: 'users', name: 'admin-users', component: AdminUsersView },
         { path: 'settings', name: 'admin-settings', component: AdminSettingsView },
