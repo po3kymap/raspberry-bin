@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"raspberry-bin-api/internal/activity"
 	"raspberry-bin-api/internal/bins"
 	"raspberry-bin-api/internal/dispatch"
 	"raspberry-bin-api/internal/middleware"
@@ -23,10 +24,11 @@ var compartments = map[string]bool{
 type DeviceHandler struct {
 	Dispatcher *dispatch.Dispatcher
 	Bins       *bins.Service
+	Activity   *activity.Recorder
 }
 
-func NewDeviceHandler(dispatcher *dispatch.Dispatcher, binService *bins.Service) *DeviceHandler {
-	return &DeviceHandler{Dispatcher: dispatcher, Bins: binService}
+func NewDeviceHandler(dispatcher *dispatch.Dispatcher, binService *bins.Service, recorder *activity.Recorder) *DeviceHandler {
+	return &DeviceHandler{Dispatcher: dispatcher, Bins: binService, Activity: recorder}
 }
 
 func (h *DeviceHandler) checkBin(c *gin.Context, binID string) bool {
@@ -96,5 +98,9 @@ func (h *DeviceHandler) Lid(c *gin.Context) {
 
 	log.Printf("[AUDIT] admin %q: %s %s on %q from %s",
 		c.GetString(middleware.UsernameKey), action, compartment, req.BinID, c.ClientIP())
+	h.Activity.Record(c.Request.Context(), activity.Event{
+		Type: activity.Lid, Username: c.GetString(middleware.UsernameKey), BinID: req.BinID,
+		Compartment: compartment, Action: action, IP: c.ClientIP(),
+	})
 	c.JSON(http.StatusAccepted, gin.H{"status": "queued"})
 }

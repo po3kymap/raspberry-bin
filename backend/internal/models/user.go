@@ -16,6 +16,8 @@ type User struct {
 	FailedAttempts int       `firestore:"failed_attempts"`
 	LockedUntil    time.Time `firestore:"locked_until"`
 	CreatedAt      time.Time `firestore:"created_at"`
+	// Last successful login, shown to admins
+	LastLoginAt time.Time `firestore:"last_login_at"`
 
 	// Days in a row with at least one sorted item. Dates are "2006-01-02"
 	// in the bin's time zone (Europe/Amsterdam).

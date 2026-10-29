@@ -83,6 +83,18 @@ func (s *memoryStore) DeleteSession(_ context.Context, tokenHash string) error {
 	return nil
 }
 
+func (s *memoryStore) SetLastLogin(_ context.Context, username string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[username]
+	if !ok {
+		return ErrUserNotFound
+	}
+	user.LastLoginAt = at
+	s.users[username] = user
+	return nil
+}
+
 const (
 	testAdmin    = "admin"
 	testUser     = "alice"
@@ -138,6 +150,32 @@ func TestRegisterRejectsBadInput(t *testing.T) {
 	// Usernames are case-insensitive, so "ALICE" is the same account
 	if _, err := service.Register(ctx, "ALICE", testPassword); !errors.Is(err, ErrUserExists) {
 		t.Errorf("duplicate user: error = %v, want %v", err, ErrUserExists)
+	}
+}
+
+func TestAdminCreatesUsersWithEitherRole(t *testing.T) {
+	service, store, _ := newTestService(t)
+	ctx := context.Background()
+
+	for username, role := range map[string]string{"bob": models.RoleUser, "carol": models.RoleAdmin} {
+		if _, err := service.CreateUser(ctx, username, testPassword, role); err != nil {
+			t.Fatalf("create %s: %v", username, err)
+		}
+		user := store.users[username]
+		if user.Role != role || !CheckPassword(user.PasswordHash, testPassword) {
+			t.Errorf("%s: role = %q, password stored as hash = %v; want %q, true",
+				username, user.Role, CheckPassword(user.PasswordHash, testPassword), role)
+		}
+	}
+
+	if _, err := service.CreateUser(ctx, "dave", testPassword, "superuser"); !errors.Is(err, ErrInvalidRole) {
+		t.Errorf("unknown role: error = %v, want %v", err, ErrInvalidRole)
+	}
+	if _, err := service.CreateUser(ctx, "dave", "weak", models.RoleUser); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("weak password: error = %v, want %v", err, ErrWeakPassword)
+	}
+	if _, err := service.CreateUser(ctx, testUser, testPassword, models.RoleUser); !errors.Is(err, ErrUserExists) {
+		t.Errorf("existing user: error = %v, want %v", err, ErrUserExists)
 	}
 }
 
@@ -287,5 +325,36 @@ func TestSessionStoredOnlyAsHash(t *testing.T) {
 	}
 	if _, ok := store.sessions[HashToken(result.Token)]; !ok {
 		t.Error("session is not stored under the token hash")
+	}
+}
+
+func TestLoginRecordsLastLogin(t *testing.T) {
+	service, store, clock := newTestService(t)
+	ctx := context.Background()
+
+	result, err := service.Login(ctx, testUser, testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginTime := *clock
+	if got := store.users[testUser].LastLoginAt; !got.Equal(loginTime) {
+		t.Fatalf("last login = %v, want %v", got, loginTime)
+	}
+
+	// Using the session later is not a login
+	*clock = clock.Add(time.Hour)
+	if _, err := service.ValidateSession(ctx, result.Token); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.users[testUser].LastLoginAt; !got.Equal(loginTime) {
+		t.Errorf("last login after a request = %v, want still %v", got, loginTime)
+	}
+
+	// A wrong password is not a login either
+	if _, err := service.Login(ctx, testUser, "wrong-password-1"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password: error = %v", err)
+	}
+	if got := store.users[testUser].LastLoginAt; !got.Equal(loginTime) {
+		t.Errorf("last login after a wrong password = %v, want still %v", got, loginTime)
 	}
 }

@@ -21,7 +21,7 @@ services:
     volumes:
       - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -39,8 +39,10 @@ services:
       - "5000"
     networks:
       - ml
+    environment:
+      CONFIDENCE_THRESHOLD: "0.80"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -68,8 +70,8 @@ services:
 
 networks:
   # Caddy <-> API; also gives the API internet access for Firebase
-  web:
-  # API <-> ML only; "internal" means no route to the outside world
+  web: # API <-> ML only; "internal" means no route to the outside world
+
   ml:
     internal: true
 

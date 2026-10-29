@@ -9,6 +9,7 @@ import (
 	_ "time/tzdata" // time zone data built in, so Europe/Amsterdam works in any container
 
 	"raspberry-bin-api/config"
+	"raspberry-bin-api/internal/activity"
 	"raspberry-bin-api/internal/auth"
 	"raspberry-bin-api/internal/bins"
 	"raspberry-bin-api/internal/clients"
@@ -82,13 +83,18 @@ func main() {
 	authService := auth.NewService(userRepo)
 	binService := bins.NewService(repository.NewBinRepository(firebaseApp.DB))
 	dispatcher := dispatch.New(dispatch.DefaultConfig())
+	activityRepo := repository.NewActivityRepository(firebaseApp.DB)
+	recorder := activity.NewRecorder(activityRepo)
 
-	scanHandler := handlers.NewScanHandler(scanRepo, clients.NewAIClient(aiServiceURL),
-		storage.NewFileStorage(firebaseApp.Storage, bucketName), dispatcher)
-	authHandler := handlers.NewAuthHandler(authService)
+	fileStorage := storage.NewFileStorage(firebaseApp.Storage, bucketName)
+	aiClient := clients.NewAIClient(aiServiceURL)
+	scanHandler := handlers.NewScanHandler(scanRepo, aiClient, fileStorage, dispatcher, recorder)
+	checkHandler := handlers.NewCheckHandler(repository.NewCheckRepository(firebaseApp.DB), aiClient, fileStorage)
+	authHandler := handlers.NewAuthHandler(authService, recorder)
 	scanRequestHandler := handlers.NewScanRequestHandler(dispatcher, binService)
-	deviceHandler := handlers.NewDeviceHandler(dispatcher, binService)
+	deviceHandler := handlers.NewDeviceHandler(dispatcher, binService, recorder)
 	meHandler := handlers.NewMeHandler(scanRepo, userRepo, location)
+	adminHandler := handlers.NewAdminHandler(authService, userRepo, scanRepo, binService, recorder, activityRepo, fileStorage, location)
 
 	r := gin.Default()
 	r.MaxMultipartMemory = maxScanBodySize
@@ -108,6 +114,8 @@ func main() {
 	loginLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 5)
 	registerLimiter := middleware.NewRateLimiter(rate.Every(10*time.Second), 3)
 	scanStartLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 3)
+	// The model is slow on the CPU, so photo checks are limited per user
+	checkLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 3)
 	userLimiter := middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 20)
 	deviceLimiter := middleware.NewRateLimiter(rate.Every(500*time.Millisecond), 10)
 	perUser := func(c *gin.Context) string { return c.GetString(middleware.UsernameKey) }
@@ -132,6 +140,7 @@ func main() {
 		user.GET("/scan-requests/:id", userLimiter.MiddlewareByKey(perUser), longPoll, scanRequestHandler.Get)
 		user.GET("/me/scans", userLimiter.MiddlewareByKey(perUser), meHandler.Scans)
 		user.GET("/me/stats", userLimiter.MiddlewareByKey(perUser), meHandler.Stats)
+		user.POST("/check", checkLimiter.MiddlewareByKey(perUser), middleware.MaxBodySize(maxScanBodySize), checkHandler.Check)
 	}
 
 	// Admins. The role is checked on every request, so a user token never opens these.
@@ -141,6 +150,14 @@ func main() {
 		admin.GET("/me", authHandler.Me)
 		admin.POST("/logout", authHandler.Logout)
 		admin.POST("/lids/:compartment/:action", jsonBody, deviceHandler.Lid)
+
+		admin.GET("/users", userLimiter.MiddlewareByKey(perUser), adminHandler.ListUsers)
+		admin.POST("/users", userLimiter.MiddlewareByKey(perUser), jsonBody, adminHandler.CreateUser)
+		admin.DELETE("/users/:username", userLimiter.MiddlewareByKey(perUser), adminHandler.DeleteUser)
+		admin.GET("/stats", userLimiter.MiddlewareByKey(perUser), adminHandler.Stats)
+		admin.GET("/activity", userLimiter.MiddlewareByKey(perUser), adminHandler.ListActivity)
+		admin.GET("/images/:file", userLimiter.MiddlewareByKey(perUser), adminHandler.ScanImage)
+		admin.POST("/bins/connect", scanStartLimiter.MiddlewareByKey(perUser), jsonBody, adminHandler.ConnectBin)
 	}
 
 	// The bin (Raspberry Pi), authenticated with the device API key
