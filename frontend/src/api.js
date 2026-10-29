@@ -172,3 +172,20 @@ export async function getScanImageUrl(imageId) {
   if (!response.ok) return null
   return URL.createObjectURL(await response.blob())
 }
+
+// Photo check with the phone camera: which bin does this item belong in?
+export async function checkItem(image) {
+  if (USE_MOCKS) return mock.checkItem()
+  const form = new FormData()
+  form.append('image', image, 'item.jpg')
+  // No Content-Type header: the browser sets the multipart boundary itself
+  const response = await fetch('/api/check', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.value?.token}` },
+    body: form,
+  })
+  const data = await response.json().catch(() => null)
+  if (response.status === 401) clearSession()
+  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+  return data
+}

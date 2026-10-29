@@ -39,10 +39,15 @@ func NewFileStorage(client *storage.Client, bucket string) *FileStorage {
 	}
 }
 
-// UploadImage stores the file under a random name and returns its URL and the
-// object name (e.g. "scans/<uuid>.jpg"). The client's file name is never used,
-// so it cannot influence the storage path.
+// UploadImage stores a bin photo under a random name in "scans/" and returns
+// its URL and the object name (e.g. "scans/<uuid>.jpg").
 func (s *FileStorage) UploadImage(file *multipart.FileHeader, contentType string) (imageURL, objectName string, err error) {
+	return s.UploadImageTo("scans", file, contentType)
+}
+
+// UploadImageTo stores the file under a random name in the folder. The
+// client's file name is never used, so it cannot influence the storage path.
+func (s *FileStorage) UploadImageTo(folder string, file *multipart.FileHeader, contentType string) (imageURL, objectName string, err error) {
 	ext, ok := extensions[contentType]
 	if !ok {
 		return "", "", fmt.Errorf("unsupported content type %q", contentType)
@@ -60,7 +65,7 @@ func (s *FileStorage) UploadImage(file *multipart.FileHeader, contentType string
 	}
 	defer f.Close()
 
-	filename := "scans/" + uuid.NewString() + ext
+	filename := folder + "/" + uuid.NewString() + ext
 	obj := bucket.Object(filename)
 	writer := obj.NewWriter(ctx)
 	writer.ContentType = contentType

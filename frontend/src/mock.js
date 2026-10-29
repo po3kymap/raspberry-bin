@@ -438,3 +438,8 @@ export async function getAdminStats(from, to, binId) {
     },
   }
 }
+
+export async function checkItem() {
+  await sleep(1200)
+  return randomResult()
+}

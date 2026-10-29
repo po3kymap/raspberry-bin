@@ -78,6 +78,19 @@ If `can_sort` is `false`, all lids stay closed and `reason` says why:
 `category` is `GENERAL_WASTE`, `ORGANIC`, `PAPER`, `PMD`, `UNSUPPORTED`
 (or `unknown` / `rejected` when the photo could not be classified).
 
+## Check an item with the phone camera (user token)
+
+### `POST /api/check` (multipart form)
+Field `image` (JPEG or PNG, max 5 MB) →
+`200 {"category": "PMD", "confidence": 0.91, "can_sort": true, "reason": ""}`
+
+For trying at home which bin an item belongs in: no bin, no QR and no lid.
+`can_sort` / `reason` mean the same as in a scan result. Checks never count
+for the streak, the statistics or the activity log. The photo and result are
+saved (Storage `checks/`, Firestore `checks`) as training data for the model.
+
+- `400` no image, not JPEG/PNG or too large, `429` more than about 1 check per 3 s
+
 ## My data (user token)
 
 ### `GET /api/me/scans?limit=20&before=<scanned_at>`

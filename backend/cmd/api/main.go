@@ -87,7 +87,9 @@ func main() {
 	recorder := activity.NewRecorder(activityRepo)
 
 	fileStorage := storage.NewFileStorage(firebaseApp.Storage, bucketName)
-	scanHandler := handlers.NewScanHandler(scanRepo, clients.NewAIClient(aiServiceURL), fileStorage, dispatcher, recorder)
+	aiClient := clients.NewAIClient(aiServiceURL)
+	scanHandler := handlers.NewScanHandler(scanRepo, aiClient, fileStorage, dispatcher, recorder)
+	checkHandler := handlers.NewCheckHandler(repository.NewCheckRepository(firebaseApp.DB), aiClient, fileStorage)
 	authHandler := handlers.NewAuthHandler(authService, recorder)
 	scanRequestHandler := handlers.NewScanRequestHandler(dispatcher, binService)
 	deviceHandler := handlers.NewDeviceHandler(dispatcher, binService, recorder)
@@ -112,6 +114,8 @@ func main() {
 	loginLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 5)
 	registerLimiter := middleware.NewRateLimiter(rate.Every(10*time.Second), 3)
 	scanStartLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 3)
+	// The model is slow on the CPU, so photo checks are limited per user
+	checkLimiter := middleware.NewRateLimiter(rate.Every(3*time.Second), 3)
 	userLimiter := middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 20)
 	deviceLimiter := middleware.NewRateLimiter(rate.Every(500*time.Millisecond), 10)
 	perUser := func(c *gin.Context) string { return c.GetString(middleware.UsernameKey) }
@@ -136,6 +140,7 @@ func main() {
 		user.GET("/scan-requests/:id", userLimiter.MiddlewareByKey(perUser), longPoll, scanRequestHandler.Get)
 		user.GET("/me/scans", userLimiter.MiddlewareByKey(perUser), meHandler.Scans)
 		user.GET("/me/stats", userLimiter.MiddlewareByKey(perUser), meHandler.Stats)
+		user.POST("/check", checkLimiter.MiddlewareByKey(perUser), middleware.MaxBodySize(maxScanBodySize), checkHandler.Check)
 	}
 
 	// Admins. The role is checked on every request, so a user token never opens these.
