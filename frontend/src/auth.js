@@ -34,3 +34,8 @@ export function clearSession() {
 export function isLoggedIn() {
   return isValid(session.value)
 }
+
+// Only hides admin screens; the backend checks the role on every admin request
+export function isAdmin() {
+  return isLoggedIn() && session.value.role === 'admin'
+}

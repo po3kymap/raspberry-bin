@@ -1,8 +1,8 @@
 <script setup>
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { logout } from './api.js'
-import { session } from './auth.js'
+import { isAdmin, session } from './auth.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -10,6 +10,8 @@ const router = useRouter()
 watch(session, (value) => {
   if (!value && !route.meta.guest && !route.meta.public) {
     router.replace({ name: 'login' })
+  } else if (value && route.meta.admin && !isAdmin()) {
+    router.replace({ name: 'home' })
   }
 })
 
@@ -18,11 +20,13 @@ async function onLogout() {
   router.replace({ name: 'login' })
 }
 
-const tabs = [
+const tabs = computed(() => [
   { to: '/', label: 'Scan', icon: 'M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10' },
   { to: '/stats', label: 'Statistics', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
-  { to: '/admin', label: 'Admin', icon: 'M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z' },
-]
+  { to: '/settings', label: 'Settings', icon: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6' },
+  // The Admin tab is shown to admins only
+  ...(isAdmin() ? [{ to: '/admin', label: 'Admin', icon: 'M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z' }] : []),
+])
 </script>
 
 <template>
